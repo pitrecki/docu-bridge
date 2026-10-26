@@ -51,6 +51,13 @@ The database-first sequence is intentional. Database transactions do not encompa
 
 Correct state transitions and failure handling matter more than adding features. Prefer a small public API, explicit invariants, short transactions, deterministic tests and understandable code. Verify persistence with PostgreSQL, cover edge cases around storage failure and concurrent version creation, and keep docs restricted to decisions that matter to maintainers and consumers.
 
+## Request idempotency
+
+Mutating upload commands will carry a request idempotency key, as selected by the
+project owner. Duplicate requests must not create additional versions. Key scope,
+conflicting payload detection, concurrent duplicates and replay after failure
+remain open until the facade and persistence contracts are designed.
+
 ## Open decisions
 
-The precise concurrency strategy for assigning version numbers, duplicate-request semantics, cleanup/reconciliation after partially completed uploads and physical deletion/retention policy must be resolved against the actual implementation before treating them as guarantees. No framework or new module should be introduced solely to pre-empt these decisions.
+The precise concurrency strategy for assigning version numbers, detailed duplicate-request semantics, cleanup/reconciliation after partially completed uploads and physical deletion/retention policy must be resolved against the actual implementation before treating them as guarantees. No framework or new module should be introduced solely to pre-empt these decisions.
