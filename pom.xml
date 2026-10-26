@@ -8,6 +8,7 @@
   <packaging>pom</packaging>
   <modules>
     <module>core</module>
+    <module>filesystem</module>
   </modules>
   <properties>
     <maven.compiler.release>21</maven.compiler.release>

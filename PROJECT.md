@@ -53,11 +53,46 @@ Correct state transitions and failure handling matter more than adding features.
 
 ## Request idempotency
 
-Mutating upload commands will carry a request idempotency key, as selected by the
-project owner. Duplicate requests must not create additional versions. Key scope,
-conflicting payload detection, concurrent duplicates and replay after failure
-remain open until the facade and persistence contracts are designed.
+Upload commands will carry a globally unique request idempotency key, as selected
+by the project owner. A matching replay returns the existing version without
+creating another version; different content or metadata with the same key is a
+conflict. Replaying a `PENDING` request reports that it is in progress. A `FAILED`
+request remains failed; a new attempt requires a new key. These are agreed facade
+requirements, not behavior implemented by the content store. Fingerprint encoding,
+key persistence and atomic duplicate resolution remain to be implemented.
+
+## Content storage contract
+
+`DocumentContentStore` streams immutable bytes under a version UUID. `store` rejects
+an existing key; it does not compare content or implement request idempotency.
+The caller owns the upload stream and must close streams returned by `open`.
+Storage failures are reported as `IOException`; missing content and duplicate keys
+have specific exception types in `core`. The store knows neither document state
+nor authorization; the facade must allow downloads only for `AVAILABLE` versions.
+Physical deletion is not exposed in this increment.
+
+The `filesystem` module implements this port without additional runtime libraries.
+Its root must be a private application-controlled directory; external processes
+must not replace the root or modify its entries. Keys are UUIDs, never filenames.
+The adapter rejects symbolic links as the root and refuses to read symbolic links
+or non-regular content entries. Host-level access and retention policy remain the
+host application's responsibility.
+
+Writes stream to a temporary file in the same root, close the output, then publish
+using an atomic hard link. This requires filesystem hard-link support; unsupported
+filesystems fail rather than falling back to an overwrite-prone move. Concurrent
+writes of one key have exactly one winner, across adapter instances as well.
+Readers never see a partially copied file under its final key. This is publication
+atomicity, not a guarantee of durability across power loss.
+
+Ordinary upload failures clean up staging files, preserving the original cause
+and any cleanup failure. A process interruption can leave `.upload-*.tmp` files;
+these are not downloadable by UUID. Failure after publication (including staging
+cleanup failure) can leave a complete blob despite the call reporting failure.
+The future facade must keep that version unavailable until database finalization
+or explicit reconciliation succeeds; blob existence alone is insufficient.
+Reconciliation and safe cleanup of interrupted uploads are not implemented yet.
 
 ## Open decisions
 
-The precise concurrency strategy for assigning version numbers, detailed duplicate-request semantics, cleanup/reconciliation after partially completed uploads and physical deletion/retention policy must be resolved against the actual implementation before treating them as guarantees. No framework or new module should be introduced solely to pre-empt these decisions.
+The precise concurrency strategy for assigning version numbers, idempotency fingerprint and persistence details, cleanup/reconciliation after partially completed uploads and physical deletion/retention policy must be resolved against the actual implementation before treating them as guarantees. No framework or new module should be introduced solely to pre-empt these decisions.

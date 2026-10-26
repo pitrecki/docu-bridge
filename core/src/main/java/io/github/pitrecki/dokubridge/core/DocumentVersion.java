@@ -5,7 +5,7 @@ import java.util.UUID;
 
 /**
  * Immutable version snapshot. Changing this snapshot does not persist it or write content.
- * Only a persisted AVAILABLE version may be served by a content adapter.
+ * The facade may serve content only for a persisted AVAILABLE version.
  */
 public record DocumentVersion(UUID id, UUID documentId, int number, DocumentVersionState state) {
     public DocumentVersion {
