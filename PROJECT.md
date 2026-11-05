@@ -51,6 +51,37 @@ The database-first sequence is intentional. Database transactions do not encompa
 
 Correct state transitions and failure handling matter more than adding features. Prefer a small public API, explicit invariants, short transactions, deterministic tests and understandable code. Verify persistence with PostgreSQL, cover edge cases around storage failure and concurrent version creation, and keep docs restricted to decisions that matter to maintainers and consumers.
 
+## Read facade
+
+`DocumentBridge` is the implemented inbound port; `DefaultDocumentBridge` depends
+only on `BusinessDocumentRepository`, `DocumentVersionRepository` and
+`DocumentContentStore`, all defined in `core`. Persistence adapters will implement
+the repository ports outside the core. The existing `filesystem` module implements
+the content port. No Spring, JPA or filesystem implementation is imported by core.
+
+`get(id)` returns an `Optional`; `findByOwner(owner)` returns an immutable list.
+Both expose `ACTIVE` and `ARCHIVED` documents and hide `DELETED` documents.
+`getContent(documentId, versionId)` opens content only for a visible document and
+an `AVAILABLE` version belonging to that document. A missing or deleted document
+raises `DocumentNotFoundException`; an absent or foreign version raises
+`DocumentVersionNotFoundException`. `PENDING` and `FAILED` versions raise
+`DocumentContentUnavailableException` before the content store is called. Storage
+I/O errors propagate without claiming a successful download. Callers close returned
+streams. Null query arguments are rejected.
+
+These checks operate on repository snapshots. They do not lock a document during
+streaming, revoke an already opened stream on deletion, or authorize a caller.
+The host application remains responsible for authorization.
+
+`BusinessDocument` snapshots include an immutable `Map<String,Object>` of JSON
+metadata. Accepted values are strings, booleans, nulls, finite numbers, nested maps
+with string keys and lists. Supported number classes are `Byte`, `Short`, `Integer`,
+`Long`, `Float`, `Double`, `BigInteger` and `BigDecimal`; values and numeric types
+are preserved. Containers are copied recursively and made unmodifiable. Null map
+keys, cycles, non-finite numbers and other object types are rejected. Shared
+acyclic containers are valid. This does not yet define canonical serialization
+or a fingerprint for request idempotency.
+
 ## Request idempotency
 
 Upload commands will carry a globally unique request idempotency key, as selected
@@ -89,7 +120,7 @@ Ordinary upload failures clean up staging files, preserving the original cause
 and any cleanup failure. A process interruption can leave `.upload-*.tmp` files;
 these are not downloadable by UUID. Failure after publication (including staging
 cleanup failure) can leave a complete blob despite the call reporting failure.
-The future facade must keep that version unavailable until database finalization
+The upload implementation must keep that version unavailable until database finalization
 or explicit reconciliation succeeds; blob existence alone is insufficient.
 Reconciliation and safe cleanup of interrupted uploads are not implemented yet.
 

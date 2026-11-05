@@ -11,9 +11,10 @@ Requires JDK 21 and network access to Maven Central on the first build.
 ./mvnw verify
 ```
 
-The current implementation is the technology-independent `core` foundation:
-owner references, document/version states and immutable version snapshots with
-explicit upload finalization, plus the `DocumentContentStore` streaming port.
+The `core` module contains the domain snapshots, immutable JSON metadata and the
+read facade `DocumentBridge`, implemented by `DefaultDocumentBridge`. Its outbound
+ports are `BusinessDocumentRepository`, `DocumentVersionRepository` and
+`DocumentContentStore`.
 The `filesystem` module provides immutable local content storage. Neither module
 adds third-party runtime dependencies.
 
@@ -34,6 +35,27 @@ prerequisite:
 ./mvnw -pl filesystem -am verify
 ```
 
-The facade, idempotent commands, repository ports, JPA adapters, Spring Boot
-integration and sample application are not implemented yet. The agreed request
-idempotency semantics in `PROJECT.md` apply to that future facade, not raw storage.
+## Ports and adapters
+
+```mermaid
+flowchart LR
+    Host[Host application] --> Bridge[DocumentBridge]
+    Bridge --> Service[DefaultDocumentBridge in core]
+    Service --> Documents[BusinessDocumentRepository]
+    Service --> Versions[DocumentVersionRepository]
+    Service --> Content[DocumentContentStore]
+    Filesystem[FilesystemDocumentContentStore] -. implements .-> Content
+    JPA[JPA adapters: planned] -. implements .-> Documents
+    JPA -. implements .-> Versions
+```
+
+The facade exposes `get`, `findByOwner` and `getContent`. Active and archived
+documents are readable; deleted documents appear absent. Content is available
+only for an `AVAILABLE` version belonging to the requested document, regardless
+of whether bytes already exist in storage. The host application authorizes callers
+and closes content streams. See [PROJECT.md](PROJECT.md#read-facade) for errors,
+metadata types and consistency limits.
+
+Write operations, request idempotency, JPA adapters, Spring Boot integration and
+the sample application are not implemented yet. Repository implementations used
+by the current tests are test fixtures, not production persistence adapters.
