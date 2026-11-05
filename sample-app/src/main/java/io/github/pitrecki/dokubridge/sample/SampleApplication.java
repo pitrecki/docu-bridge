@@ -1,15 +1,15 @@
 package io.github.pitrecki.dokubridge.sample;
 
-import io.github.pitrecki.dokubridge.core.domain.ContentSha256;
-import io.github.pitrecki.dokubridge.core.domain.DocumentOwnerRef;
-import io.github.pitrecki.dokubridge.core.domain.DocumentVersion;
-import io.github.pitrecki.dokubridge.core.domain.DocumentVersionState;
-import io.github.pitrecki.dokubridge.core.port.in.AddDocumentVersion;
-import io.github.pitrecki.dokubridge.core.port.in.Archive;
-import io.github.pitrecki.dokubridge.core.port.in.AttachDocument;
-import io.github.pitrecki.dokubridge.core.port.in.Delete;
+import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
+import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
+import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
-import io.github.pitrecki.dokubridge.core.port.in.UpdateMetadata;
+import io.github.pitrecki.dokubridge.core.port.in.document.Archive;
+import io.github.pitrecki.dokubridge.core.port.in.document.Delete;
+import io.github.pitrecki.dokubridge.core.port.in.document.UpdateMetadata;
+import io.github.pitrecki.dokubridge.core.port.in.upload.AddDocumentVersion;
+import io.github.pitrecki.dokubridge.core.port.in.upload.AttachDocument;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -17,6 +17,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.boot.SpringApplication;
@@ -60,17 +61,20 @@ public class SampleApplication {
                 || bridge.findByOwner(owner).stream().noneMatch(document -> document.id().equals(first.documentId()))) {
             throw new IllegalStateException("Document workflow failed");
         }
+        var history = bridge.getVersions(first.documentId());
+        if (!history.equals(List.of(first, second))) throw new IllegalStateException("Version history differs");
         var document = bridge.get(first.documentId()).orElseThrow();
         var updated = bridge.updateMetadata(new UpdateMetadata(document.id(), document.revision(), Map.of("category", "revised")));
         var archived = bridge.archive(new Archive(document.id()));
         if (archived.revision() != updated.revision() + 1) throw new IllegalStateException("Archive revision differs");
+        if (!bridge.getVersions(document.id()).equals(history)) throw new IllegalStateException("Archived history differs");
         bridge.delete(new Delete(document.id()));
         bridge.delete(new Delete(document.id()));
         if (bridge.get(document.id()).isPresent()
                 || bridge.findByOwner(owner).stream().anyMatch(candidate -> candidate.id().equals(document.id()))) {
             throw new IllegalStateException("Deleted document is still visible");
         }
-        System.out.println("Verified document " + first.documentId() + " with versions 1 and 2, metadata, archive and logical deletion");
+        System.out.println("Verified document " + first.documentId() + " with version history 1 and 2, metadata, archive and logical deletion");
     }
 
     private static ContentSha256 checksum(byte[] bytes) {

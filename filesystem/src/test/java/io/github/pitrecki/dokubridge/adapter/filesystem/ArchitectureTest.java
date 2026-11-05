@@ -8,6 +8,13 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 
 class ArchitectureTest {
     @Test
+    void filesystemImplementationStaysInTheContentFeaturePackage() {
+        var adapter = new ClassFileImporter().withImportOption(new ImportOption.DoNotIncludeTests())
+                .importPackages("io.github.pitrecki.dokubridge.adapter.filesystem");
+        classes().should().resideInAPackage("..adapter.filesystem.content..").check(adapter);
+    }
+
+    @Test
     void adapterUsesDomainAndOutboundPortsWithoutDependingOnApplicationOrInboundPorts() {
         var adapter = new ClassFileImporter().withImportOption(new ImportOption.DoNotIncludeTests())
                 .importPackages("io.github.pitrecki.dokubridge.adapter.filesystem");

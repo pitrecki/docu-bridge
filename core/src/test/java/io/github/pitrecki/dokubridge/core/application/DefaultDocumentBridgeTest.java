@@ -1,23 +1,24 @@
 package io.github.pitrecki.dokubridge.core.application;
 
-import io.github.pitrecki.dokubridge.core.domain.BusinessDocument;
-import io.github.pitrecki.dokubridge.core.domain.BusinessDocumentState;
-import io.github.pitrecki.dokubridge.core.domain.DocumentOwnerRef;
-import io.github.pitrecki.dokubridge.core.domain.DocumentVersion;
-import io.github.pitrecki.dokubridge.core.domain.DocumentVersionState;
-import io.github.pitrecki.dokubridge.core.domain.exception.DocumentContentUnavailableException;
-import io.github.pitrecki.dokubridge.core.domain.exception.DocumentNotFoundException;
-import io.github.pitrecki.dokubridge.core.domain.exception.DocumentVersionNotFoundException;
+import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentContentUnavailableException;
+import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
+import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocumentState;
+import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.document.exception.DocumentNotFoundException;
+import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
+import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
+import io.github.pitrecki.dokubridge.core.domain.version.exception.DocumentVersionNotFoundException;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
-import io.github.pitrecki.dokubridge.core.port.out.BusinessDocumentRepository;
-import io.github.pitrecki.dokubridge.core.port.out.DocumentContentStore;
-import io.github.pitrecki.dokubridge.core.port.out.DocumentVersionRepository;
+import io.github.pitrecki.dokubridge.core.port.out.content.DocumentContentStore;
+import io.github.pitrecki.dokubridge.core.port.out.document.BusinessDocumentRepository;
+import io.github.pitrecki.dokubridge.core.port.out.version.DocumentVersionRepository;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,7 +35,7 @@ class DefaultDocumentBridgeTest {
     private final UUID documentId = UUID.randomUUID();
     private final UUID versionId = UUID.randomUUID();
     private final Map<UUID, BusinessDocument> documents = new HashMap<>();
-    private final Map<UUID, DocumentVersion> versions = new HashMap<>();
+    private final Map<UUID, DocumentVersion> versions = new LinkedHashMap<>();
     private final AtomicBoolean opened = new AtomicBoolean();
     private final BusinessDocumentRepository documentRepository = new BusinessDocumentRepository() {
         @Override
@@ -47,8 +48,14 @@ class DefaultDocumentBridgeTest {
             return documents.values().stream().filter(document -> document.owner().equals(owner)).toList();
         }
     };
-    private final DocumentVersionRepository versionRepository = (document, version) ->
-            Optional.ofNullable(versions.get(version));
+    private final DocumentVersionRepository versionRepository = new DocumentVersionRepository() {
+        public Optional<DocumentVersion> findById(UUID document, UUID version) {
+            return Optional.ofNullable(versions.get(version));
+        }
+        public List<DocumentVersion> findByDocument(UUID document) {
+            return new ArrayList<>(versions.values());
+        }
+    };
     private final DocumentContentStore contentStore = new DocumentContentStore() {
         @Override
         public void store(UUID version, InputStream source) {
@@ -83,6 +90,7 @@ class DefaultDocumentBridgeTest {
             throw new AssertionError("Deleted documents must not trigger version lookup");
         }, contentStore);
         assertThat(guarded.get(documentId)).isEmpty();
+        assertThatThrownBy(() -> guarded.getVersions(documentId)).isInstanceOf(DocumentNotFoundException.class);
         assertThatThrownBy(() -> guarded.getContent(documentId, versionId)).isInstanceOf(DocumentNotFoundException.class);
         assertThat(opened).isFalse();
     }
@@ -90,6 +98,7 @@ class DefaultDocumentBridgeTest {
     @Test
     void reportsMissingDocumentWithoutOpeningContent() {
         assertThat(bridge.get(documentId)).isEmpty();
+        assertThatThrownBy(() -> bridge.getVersions(documentId)).isInstanceOf(DocumentNotFoundException.class);
         assertThatThrownBy(() -> bridge.getContent(documentId, versionId)).isInstanceOf(DocumentNotFoundException.class);
         assertThat(opened).isFalse();
     }
@@ -98,6 +107,7 @@ class DefaultDocumentBridgeTest {
     void hidesAnAdapterSnapshotWithTheWrongDocumentId() {
         documents.put(documentId, new BusinessDocument(UUID.randomUUID(), owner, Map.of(), BusinessDocumentState.ACTIVE));
         assertThat(bridge.get(documentId)).isEmpty();
+        assertThatThrownBy(() -> bridge.getVersions(documentId)).isInstanceOf(DocumentNotFoundException.class);
         assertThatThrownBy(() -> bridge.getContent(documentId, versionId)).isInstanceOf(DocumentNotFoundException.class);
         assertThat(opened).isFalse();
     }
@@ -192,11 +202,51 @@ class DefaultDocumentBridgeTest {
     }
 
     @Test
+    void visibleDocumentWithoutVersionsHasAnEmptyHistory() {
+        putDocument(BusinessDocumentState.ACTIVE);
+        assertThat(bridge.getVersions(documentId)).isEmpty();
+        assertThat(opened).isFalse();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = BusinessDocumentState.class, names = {"ACTIVE", "ARCHIVED"})
+    void returnsImmutableHistoryOfEveryStateScopedToDocumentInNumberOrder(BusinessDocumentState state) {
+        putDocument(state);
+        var first = new DocumentVersion(UUID.randomUUID(), documentId, 1, DocumentVersionState.AVAILABLE);
+        var second = new DocumentVersion(UUID.randomUUID(), documentId, 2, DocumentVersionState.FAILED);
+        var third = new DocumentVersion(UUID.randomUUID(), documentId, 3, DocumentVersionState.PENDING);
+        var foreign = new DocumentVersion(UUID.randomUUID(), UUID.randomUUID(), 1, DocumentVersionState.AVAILABLE);
+        for (var version : List.of(third, foreign, first, second)) versions.put(version.id(), version);
+        var history = bridge.getVersions(documentId);
+        versions.clear();
+        assertThat(history).containsExactly(first, second, third);
+        assertThatThrownBy(() -> history.add(foreign)).isInstanceOf(UnsupportedOperationException.class);
+        assertThat(opened).isFalse();
+    }
+
+    @Test
+    void existingCustomFacadeAndSingleVersionRepositoryRemainUsableWithHistoryUnsupported() {
+        var document = putDocument(BusinessDocumentState.ACTIVE);
+        DocumentVersionRepository legacy = (doc, version) -> Optional.empty();
+        assertThat(legacy.findById(documentId, versionId)).isEmpty();
+        assertThatThrownBy(() -> new DefaultDocumentBridge(documentRepository, legacy, contentStore).getVersions(documentId))
+                .isInstanceOf(UnsupportedOperationException.class);
+        DocumentBridge custom = new DocumentBridge() {
+            public Optional<BusinessDocument> get(UUID id) { return Optional.of(document); }
+            public List<BusinessDocument> findByOwner(DocumentOwnerRef ref) { return List.of(document); }
+            public InputStream getContent(UUID doc, UUID version) { throw new UnsupportedOperationException(); }
+        };
+        assertThat(custom.get(documentId)).contains(document);
+        assertThatThrownBy(() -> custom.getVersions(documentId)).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
     void validatesDependenciesAndQueryArguments() {
         assertThatNullPointerException().isThrownBy(() -> new DefaultDocumentBridge(null, versionRepository, contentStore));
         assertThatNullPointerException().isThrownBy(() -> new DefaultDocumentBridge(documentRepository, null, contentStore));
         assertThatNullPointerException().isThrownBy(() -> new DefaultDocumentBridge(documentRepository, versionRepository, null));
         assertThatNullPointerException().isThrownBy(() -> bridge.get(null));
+        assertThatNullPointerException().isThrownBy(() -> bridge.getVersions(null));
         assertThatNullPointerException().isThrownBy(() -> bridge.findByOwner(null));
         assertThatNullPointerException().isThrownBy(() -> bridge.getContent(null, versionId));
         assertThatNullPointerException().isThrownBy(() -> bridge.getContent(documentId, null));

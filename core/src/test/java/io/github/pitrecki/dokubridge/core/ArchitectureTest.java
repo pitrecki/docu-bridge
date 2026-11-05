@@ -13,6 +13,26 @@ class ArchitectureTest {
             .importPackages("io.github.pitrecki.dokubridge.core");
 
     @Test
+    void domainAndPortsUseFeaturePackagesAroundTheCentralFacade() {
+        classes().that().resideInAPackage("..core.domain..")
+                .should().resideInAnyPackage("..core.domain.document..", "..core.domain.version..",
+                        "..core.domain.upload..", "..core.domain.audit..", "..core.domain.content..")
+                .check(CORE);
+        classes().that().resideInAPackage("..core.port.in..")
+                .and().doNotHaveFullyQualifiedName("io.github.pitrecki.dokubridge.core.port.in.DocumentBridge")
+                .should().resideInAnyPackage("..core.port.in.document..", "..core.port.in.upload..")
+                .check(CORE);
+        classes().that().resideInAPackage("..core.port.out..")
+                .should().resideInAnyPackage("..core.port.out.document..", "..core.port.out.version..",
+                        "..core.port.out.upload..", "..core.port.out.audit..", "..core.port.out.content..")
+                .check(CORE);
+        classes().that().resideInAPackage("..core.application..")
+                .and().doNotHaveFullyQualifiedName("io.github.pitrecki.dokubridge.core.application.DefaultDocumentBridge")
+                .should().resideInAPackage("..core.application.upload..")
+                .check(CORE);
+    }
+
+    @Test
     void domainDependsOnlyOnTheDomainAndJava() {
         classes().that().resideInAPackage("..core.domain..")
                 .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "..core.domain..")

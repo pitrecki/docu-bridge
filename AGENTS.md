@@ -15,8 +15,9 @@ DokuBridge is an embeddable Java library for attaching versioned documents, meta
 ## Architecture
 
 - Keep `core` independent of Spring, JPA, HTTP and filesystem details.
-- Use `core.domain` for the model, `core.domain.exception` for domain errors, `core.port.in` for the facade and commands, `core.port.out` for infrastructure contracts, and `core.application` for use-case implementations. Do not flatten these packages.
-- Keep implementations in `adapter.filesystem` and `adapter.jpa`, with JPA entities and JSON persistence mapping in `adapter.jpa.persistence`. Adapters depend on domain types and outbound ports, not on the application service or inbound ports.
+- Group the model in `core.domain.<feature>` and errors in `core.domain.<feature>.exception`, using `document`, `version`, `upload`, `audit` and `content` as appropriate. Commands belong in `core.port.in.document` or `core.port.in.upload`; keep only the central `DocumentBridge` in `core.port.in`. Outbound contracts belong in `core.port.out.<feature>`. Do not flatten these packages.
+- Keep `DefaultDocumentBridge` as the central application facade. Put the upload pipeline and fingerprinting in `core.application.upload`; place other substantial use cases in their own feature packages when needed, without adding pass-through services.
+- Keep filesystem content storage in `adapter.filesystem.content`. Group JPA repositories in `adapter.jpa.<feature>` and their entities/JSON mapping in `adapter.jpa.<feature>.persistence`. Adapters depend on domain types and outbound ports, not on application services or inbound ports.
 - Use `autoconfigure` as the Spring composition root; it may wire application services and adapters. Keep sample usage in `sample` and call the inbound port from it.
 - Run the ArchUnit checks with the normal test suite; keep dependency direction enforced when adding types.
 - `DocumentBridge` is the public facade; `DefaultDocumentBridge` implements application-level behavior in `core`.

@@ -14,7 +14,7 @@ DokuBridge is a small embeddable library for attaching documents to business ent
 
 ## Public boundary
 
-`DocumentBridge` is the application-facing entry point. Its operation set covers `AttachDocument`, `AddDocumentVersion`, `UpdateMetadata`, `Archive`, `Delete`, `Get`, `GetContent`, `FindByOwner` and explicit `ReconcileUpload`. Commands and value objects carry input validation. Public contracts must not expose JPA or filesystem implementations.
+`DocumentBridge` is the application-facing entry point. Its operation set covers `AttachDocument`, `AddDocumentVersion`, `UpdateMetadata`, `Archive`, `Delete`, `Get`, `GetContent`, `FindByOwner`, `GetVersions` and explicit `ReconcileUpload`. Commands and value objects carry input validation. Public contracts must not expose JPA or filesystem implementations.
 
 The main model consists of `BusinessDocument`, `DocumentVersion`, `DocumentOwnerRef(type, id)` and a metadata map (`Map<String, Object>`). Audit records describe meaningful actions and upload failures.
 
@@ -58,10 +58,16 @@ Correct state transitions and failure handling matter more than adding features.
 `DocumentVersionRepository` and `DocumentContentStore` for reads. Writes use the
 additional `DocumentUploadRepository` and `DocumentLifecycleRepository` ports,
 also defined in `core`. The `jpa` module implements
-the repository ports outside the core. Types live in `core.domain` and
-`core.domain.exception`; infrastructure contracts live in `core.port.out`. The
-`filesystem` module implements
-the content port. No Spring, JPA or filesystem implementation is imported by core.
+the repository ports outside the core. Domain types and errors live in
+`core.domain.<feature>` and `core.domain.<feature>.exception`. Commands use
+`core.port.in.document` or `core.port.in.upload`; outbound contracts use
+`core.port.out.<feature>`. The filesystem module implements the content port.
+No Spring, JPA or filesystem implementation is imported by core.
+
+The central facade delegates upload/reconciliation orchestration to
+`core.application.upload.DocumentUploads`, alongside package-private fingerprinting.
+Document, version, upload, audit and content packages keep responsibilities visible
+within each layer. See README for the public import migration.
 
 `get(id)` returns an `Optional`; `findByOwner(owner)` returns an immutable list.
 Both expose `ACTIVE` and `ARCHIVED` documents and hide `DELETED` documents.
@@ -72,6 +78,24 @@ raises `DocumentNotFoundException`; an absent or foreign version raises
 `DocumentContentUnavailableException` before the content store is called. Storage
 I/O errors propagate without claiming a successful download. Callers close returned
 streams. Null query arguments are rejected.
+
+`getVersions(documentId)` returns an immutable list of all `PENDING`, `AVAILABLE`
+and `FAILED` versions, ordered by number. Active and archived documents are
+visible; a missing/deleted document raises `DocumentNotFoundException` before
+version lookup. The facade filters foreign snapshots defensively and performs no
+binary I/O. An empty history for a visible document is an empty list. Listing
+versions does not grant content access: only `getContent` may open an available
+version. The host remains responsible for authorization. This operation returns
+the full history without pagination or an atomic snapshot spanning the document
+visibility check and version query.
+
+`DocumentVersionRepository.findByDocument` provides scoped version snapshots,
+including for retained deleted documents; the facade enforces visibility. Its
+default throws `UnsupportedOperationException`, preserving existing single-version
+implementations. Custom facades also inherit an unsupported default history method.
+JPA uses query projections ordered by version number, including with retained host
+entities. Existing constructors and Boot wiring enable history when the supplied
+version port supports it; no new dependency, configuration or migration is needed.
 
 These checks operate on repository snapshots. They do not lock a document during
 streaming, revoke an already opened stream on deletion, or authorize a caller.
@@ -142,9 +166,11 @@ The `jpa` module contains `JpaBusinessDocumentRepository`,
 `JpaDocumentVersionRepository`, `JpaDocumentAuditRepository`,
 `JpaDocumentUploadRepository` and `JpaDocumentLifecycleRepository`. Its runtime dependencies provide Spring ORM
 transaction boundaries, Hibernate JPA, Jackson JSON encoding, PostgreSQL JDBC
-and Flyway migrations. The core has no new runtime dependencies. Adapters live in `adapter.jpa`, with
-entities and JSON mapping in `adapter.jpa.persistence`; the filesystem adapter
-lives in `adapter.filesystem`. ArchUnit enforces the dependency direction.
+and Flyway migrations. The core has no new runtime dependencies. Repositories live
+in `adapter.jpa.document`, `adapter.jpa.version`, `adapter.jpa.upload` and
+`adapter.jpa.audit`, with entities and JSON mapping in each feature's `persistence`
+subpackage. The filesystem adapter lives in `adapter.filesystem.content`.
+ArchUnit enforces both feature placement and dependency direction.
 
 The Flyway migration is opt-in at `classpath:db/dokubridge`; use the separate
 history table `dokubridge_flyway_history`. It is outside Flyway's default

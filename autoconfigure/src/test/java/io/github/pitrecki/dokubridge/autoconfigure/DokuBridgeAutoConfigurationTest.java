@@ -1,21 +1,21 @@
 package io.github.pitrecki.dokubridge.autoconfigure;
 
-import io.github.pitrecki.dokubridge.adapter.filesystem.FilesystemDocumentContentStore;
-import io.github.pitrecki.dokubridge.adapter.jpa.JpaBusinessDocumentRepository;
-import io.github.pitrecki.dokubridge.adapter.jpa.JpaDocumentLifecycleRepository;
-import io.github.pitrecki.dokubridge.core.domain.BusinessDocument;
-import io.github.pitrecki.dokubridge.core.domain.ContentSha256;
-import io.github.pitrecki.dokubridge.core.domain.DocumentOwnerRef;
-import io.github.pitrecki.dokubridge.core.domain.DocumentVersionState;
-import io.github.pitrecki.dokubridge.core.port.in.AttachDocument;
+import io.github.pitrecki.dokubridge.adapter.filesystem.content.FilesystemDocumentContentStore;
+import io.github.pitrecki.dokubridge.adapter.jpa.document.JpaBusinessDocumentRepository;
+import io.github.pitrecki.dokubridge.adapter.jpa.document.JpaDocumentLifecycleRepository;
+import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
+import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
+import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
-import io.github.pitrecki.dokubridge.core.port.in.UpdateMetadata;
-import io.github.pitrecki.dokubridge.core.port.in.Archive;
-import io.github.pitrecki.dokubridge.core.port.in.Delete;
-import io.github.pitrecki.dokubridge.core.port.out.BusinessDocumentRepository;
-import io.github.pitrecki.dokubridge.core.port.out.DocumentAuditRepository;
-import io.github.pitrecki.dokubridge.core.port.out.DocumentContentStore;
-import io.github.pitrecki.dokubridge.core.port.out.DocumentLifecycleRepository;
+import io.github.pitrecki.dokubridge.core.port.in.document.Archive;
+import io.github.pitrecki.dokubridge.core.port.in.document.Delete;
+import io.github.pitrecki.dokubridge.core.port.in.document.UpdateMetadata;
+import io.github.pitrecki.dokubridge.core.port.in.upload.AttachDocument;
+import io.github.pitrecki.dokubridge.core.port.out.audit.DocumentAuditRepository;
+import io.github.pitrecki.dokubridge.core.port.out.content.DocumentContentStore;
+import io.github.pitrecki.dokubridge.core.port.out.document.BusinessDocumentRepository;
+import io.github.pitrecki.dokubridge.core.port.out.document.DocumentLifecycleRepository;
 import io.github.pitrecki.dokubridge.testentities.AllowedRecord;
 import io.github.pitrecki.dokubridge.testhost.ExplicitHostConfiguration;
 import io.github.pitrecki.dokubridge.testhost.HostConfiguration;
@@ -98,6 +98,7 @@ class DokuBridgeAutoConfigurationTest {
             var version = bridge.attach(command);
             assertThat(version.state()).isEqualTo(DocumentVersionState.AVAILABLE);
             assertThat(bridge.attach(command)).isEqualTo(version);
+            assertThat(bridge.getVersions(version.documentId())).containsExactly(version);
             try (var content = bridge.getContent(version.documentId(), version.id())) {
                 assertThat(content.read()).isEqualTo(42);
             }
@@ -108,6 +109,8 @@ class DokuBridgeAutoConfigurationTest {
             bridge.delete(new Delete(version.documentId()));
             bridge.delete(new Delete(version.documentId()));
             assertThat(bridge.get(version.documentId())).isEmpty();
+            assertThatThrownBy(() -> bridge.getVersions(version.documentId()))
+                    .isInstanceOf(io.github.pitrecki.dokubridge.core.domain.document.exception.DocumentNotFoundException.class);
             assertThat(context.getBean(DocumentAuditRepository.class).findByDocument(version.documentId())).hasSize(5);
             assertThat(count("host_record")).isEqualTo(1);
             assertThat(count("flyway_schema_history")).isEqualTo(1);
@@ -122,7 +125,8 @@ class DokuBridgeAutoConfigurationTest {
             var managed = context.getBean(EntityManagerFactory.class).getMetamodel().getEntities().stream()
                     .<Class<?>>map(entity -> entity.getJavaType()).toList();
             assertThat(managed).contains(AllowedRecord.class).doesNotContain(HostRecord.class);
-            assertThat(managed).anyMatch(type -> type.getPackageName().endsWith("adapter.jpa.persistence"));
+            assertThat(managed).anyMatch(type -> type.getPackageName().startsWith("io.github.pitrecki.dokubridge.adapter.jpa.")
+                    && type.getPackageName().endsWith(".persistence"));
         });
     }
 

@@ -1,7 +1,7 @@
 package io.github.pitrecki.dokubridge.autoconfigure;
 
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
-import io.github.pitrecki.dokubridge.core.port.out.DocumentContentStore;
+import io.github.pitrecki.dokubridge.core.port.out.content.DocumentContentStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;

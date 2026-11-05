@@ -1,11 +1,14 @@
 package io.github.pitrecki.dokubridge.core.port.in;
 
-import io.github.pitrecki.dokubridge.core.domain.BusinessDocument;
-import io.github.pitrecki.dokubridge.core.domain.DocumentOwnerRef;
-import io.github.pitrecki.dokubridge.core.domain.DocumentVersion;
-import io.github.pitrecki.dokubridge.core.domain.exception.DocumentContentUnavailableException;
-import io.github.pitrecki.dokubridge.core.domain.exception.DocumentNotFoundException;
-import io.github.pitrecki.dokubridge.core.domain.exception.DocumentVersionNotFoundException;
+import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
+import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
+import io.github.pitrecki.dokubridge.core.port.in.document.Archive;
+import io.github.pitrecki.dokubridge.core.port.in.document.Delete;
+import io.github.pitrecki.dokubridge.core.port.in.document.UpdateMetadata;
+import io.github.pitrecki.dokubridge.core.port.in.upload.AddDocumentVersion;
+import io.github.pitrecki.dokubridge.core.port.in.upload.AttachDocument;
+import io.github.pitrecki.dokubridge.core.port.in.upload.ReconcileUpload;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
@@ -53,6 +56,11 @@ public interface DocumentBridge {
 
     /** Returns an immutable list of the owner's non-deleted documents. */
     List<BusinessDocument> findByOwner(DocumentOwnerRef owner);
+
+    /** Returns an immutable version history in number order, including pending and failed versions. */
+    default List<DocumentVersion> getVersions(UUID documentId) {
+        throw new UnsupportedOperationException("Version history is not configured");
+    }
 
     /**
      * Opens an AVAILABLE version belonging to a non-deleted document.

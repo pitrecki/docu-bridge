@@ -25,7 +25,10 @@ final class DokuBridgeEntityScanRegistrar implements ImportBeanDefinitionRegistr
         if (!registry.containsBeanDefinition(EntityScanPackages.class.getName()) && AutoConfigurationPackages.has(beans)) {
             packages.addAll(AutoConfigurationPackages.get(beans));
         }
-        packages.add("io.github.pitrecki.dokubridge.adapter.jpa.persistence");
+        packages.add("io.github.pitrecki.dokubridge.adapter.jpa.document.persistence");
+        packages.add("io.github.pitrecki.dokubridge.adapter.jpa.version.persistence");
+        packages.add("io.github.pitrecki.dokubridge.adapter.jpa.upload.persistence");
+        packages.add("io.github.pitrecki.dokubridge.adapter.jpa.audit.persistence");
         EntityScanPackages.register(registry, packages);
     }
 }

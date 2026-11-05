@@ -50,26 +50,62 @@ these roles, enforced by ArchUnit tests in each module:
 
 ```text
 core/
-  core.domain/               document model, metadata and checksums
-    exception/               domain errors
-  core.port.in/              DocumentBridge and document commands
-  core.port.out/             repository and content-store contracts
-  core.application/          DefaultDocumentBridge and request fingerprinting
+  core.domain.document/          document, owner, metadata and lifecycle
+  core.domain.version/           version snapshots and states
+  core.domain.content/           SHA-256 value
+  core.domain.audit/             audit entries and actions
+  core.domain.<feature>.exception/ document, version, content and upload errors
+  core.port.in/                  DocumentBridge
+    document/                    metadata, archive and delete commands
+    upload/                      attach, add-version and reconciliation commands
+  core.port.out/
+    document/                    document reads and lifecycle persistence
+    version/                     version lookup and history
+    upload/                      reservation and finalization contracts
+    audit/                       audit history contract
+    content/                     binary storage contract
+  core.application/              DefaultDocumentBridge
+    upload/                      DocumentUploads and request fingerprinting
 filesystem/
-  adapter.filesystem/        FilesystemDocumentContentStore
+  adapter.filesystem.content/     FilesystemDocumentContentStore
 jpa/
-  adapter.jpa/               Jpa*Repository implementations
-    persistence/             JPA entities and JSONB mapping
+  adapter.jpa.document/           document repositories
+    persistence/                 document entity, projection and JSONB mapping
+  adapter.jpa.version/            version repository
+    persistence/                 version entity
+  adapter.jpa.upload/             upload repository
+    persistence/                 request entity
+  adapter.jpa.audit/              audit repository
+    persistence/                 audit entity
 autoconfigure/
-  autoconfigure/             Spring Boot composition and configuration properties
-starter/                     dependency-only JAR
+  autoconfigure/                  Spring Boot composition
+starter/                         dependency-only JAR
 sample-app/
-  sample/                    console client using the inbound port
+  sample/                        console client of DocumentBridge
 ```
 
-The flat `core` and `filesystem` public packages have been replaced by these
-namespaces; consumers must update their Java imports. JPA entity names and SQL
-table names remain independent of the Java package layout.
+The public Java packages now follow features within each architectural layer.
+Update imports and rebuild consumers; this changes their binary class names.
+`core.port.in.DocumentBridge` and `core.application.DefaultDocumentBridge` retain
+their paths. Domain exceptions live with the feature that owns them.
+
+| Previous import suffix | Current import suffix |
+| --- | --- |
+| `core.domain.BusinessDocument` | `core.domain.document.BusinessDocument` |
+| `core.domain.ContentSha256` | `core.domain.content.ContentSha256` |
+| `core.domain.DocumentVersion` | `core.domain.version.DocumentVersion` |
+| `core.port.in.AttachDocument` | `core.port.in.upload.AttachDocument` |
+| `core.port.in.UpdateMetadata` | `core.port.in.document.UpdateMetadata` |
+| `core.port.out.DocumentVersionRepository` | `core.port.out.version.DocumentVersionRepository` |
+| `adapter.jpa.JpaDocumentUploadRepository` | `adapter.jpa.upload.JpaDocumentUploadRepository` |
+| `adapter.jpa.persistence.*` | `adapter.jpa.<feature>.persistence.*` |
+| `adapter.filesystem.FilesystemDocumentContentStore` | `adapter.filesystem.content.FilesystemDocumentContentStore` |
+
+Custom entity manager factories must update explicit library scans to the four
+feature persistence packages, or scan `io.github.pitrecki.dokubridge.adapter.jpa`.
+Boot auto-configuration registers the four packages automatically. JPA entity
+names, SQL tables, Flyway migrations and persisted request fingerprints are
+unchanged by the package split.
 
 ```mermaid
 flowchart LR
@@ -88,7 +124,7 @@ flowchart LR
 ```
 
 The facade exposes `attach`, `addVersion`, `updateMetadata`, `archive`, `delete`,
-`get`, `findByOwner`, `getContent` and `reconcileUpload`.
+`get`, `findByOwner`, `getVersions`, `getContent` and `reconcileUpload`.
 Active and archived documents are readable; deleted documents appear absent. Content is available
 only for an `AVAILABLE` version belonging to the requested document, regardless
 of whether bytes already exist in storage. The host application authorizes callers
@@ -122,6 +158,29 @@ Automatic recovery and physical retention/purge remain unimplemented. See
 [PROJECT.md](PROJECT.md#request-idempotency) for replay and checksum contracts and
 [PostgreSQL persistence](PROJECT.md#postgresql-persistence) for transaction setup.
 
+
+## Version history
+
+```java
+import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
+import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
+import java.util.List;
+
+List<DocumentVersion> history = bridge.getVersions(documentId);
+```
+
+History includes `PENDING`, `AVAILABLE` and `FAILED` versions, ordered by version
+number. The returned list is immutable. Active and archived documents expose their
+history; missing or deleted documents raise `DocumentNotFoundException`. Listing
+performs no content I/O and does not make pending or failed content downloadable.
+The host authorizes access. This MVP operation returns the full list without
+pagination; it has the same snapshot and transaction-isolation limits as other reads.
+
+The existing `DocumentVersionRepository` now has a default `findByDocument` method.
+Custom repositories must implement it to support history; its default throws
+`UnsupportedOperationException`. Existing single-version implementations and
+custom facades remain usable after updating imports. JPA and the starter support
+history without new configuration or a database migration.
 
 ## Interrupted uploads
 
@@ -219,7 +278,7 @@ java -jar sample-app/target/dokubridge-sample-app-0.1.0-SNAPSHOT.jar
 
 The console application enables library schema initialization, validates the JPA
 schema, attaches a document, replays the request, adds version 2 and verifies its
-download through `DocumentBridge`. It then replaces metadata, archives and
+download and ordered version history through `DocumentBridge`. It then replaces metadata, archives and
 logically deletes that example document, verifies read invisibility, prints its id
 and exits. Each run creates another retained, logically deleted example document. It enables no HTTP endpoints and disables the
 sample's separate host Flyway instance; these settings belong to the sample only.
