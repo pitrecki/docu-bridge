@@ -20,6 +20,7 @@ public class BusinessDocumentEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16) private BusinessDocumentState state;
     @Column(name = "last_version", nullable = false) private int lastVersion;
+    @Column(nullable = false) private long revision;
 
     protected BusinessDocumentEntity() {
     }
@@ -43,7 +44,16 @@ public class BusinessDocumentEntity {
         return lastVersion;
     }
 
+    public void applyDocumentChange(BusinessDocument changed) {
+        if (!id.equals(changed.id()) || !ownerType.equals(changed.owner().type()) || !ownerId.equals(changed.owner().id())) {
+            throw new IllegalArgumentException("Document identity and owner cannot be changed");
+        }
+        metadata = DocumentMetadataJson.encode(changed.metadata());
+        state = changed.state();
+        revision = changed.revision();
+    }
+
     public BusinessDocument snapshot() {
-        return new BusinessDocument(id, new DocumentOwnerRef(ownerType, ownerId), DocumentMetadataJson.decode(metadata), state);
+        return new BusinessDocument(id, new DocumentOwnerRef(ownerType, ownerId), DocumentMetadataJson.decode(metadata), state, revision);
     }
 }

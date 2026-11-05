@@ -5,8 +5,11 @@ import io.github.pitrecki.dokubridge.core.domain.DocumentOwnerRef;
 import io.github.pitrecki.dokubridge.core.domain.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.domain.DocumentVersionState;
 import io.github.pitrecki.dokubridge.core.port.in.AddDocumentVersion;
+import io.github.pitrecki.dokubridge.core.port.in.Archive;
 import io.github.pitrecki.dokubridge.core.port.in.AttachDocument;
+import io.github.pitrecki.dokubridge.core.port.in.Delete;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
+import io.github.pitrecki.dokubridge.core.port.in.UpdateMetadata;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -57,7 +60,17 @@ public class SampleApplication {
                 || bridge.findByOwner(owner).stream().noneMatch(document -> document.id().equals(first.documentId()))) {
             throw new IllegalStateException("Document workflow failed");
         }
-        System.out.println("Verified document " + first.documentId() + " with versions 1 and 2");
+        var document = bridge.get(first.documentId()).orElseThrow();
+        var updated = bridge.updateMetadata(new UpdateMetadata(document.id(), document.revision(), Map.of("category", "revised")));
+        var archived = bridge.archive(new Archive(document.id()));
+        if (archived.revision() != updated.revision() + 1) throw new IllegalStateException("Archive revision differs");
+        bridge.delete(new Delete(document.id()));
+        bridge.delete(new Delete(document.id()));
+        if (bridge.get(document.id()).isPresent()
+                || bridge.findByOwner(owner).stream().anyMatch(candidate -> candidate.id().equals(document.id()))) {
+            throw new IllegalStateException("Deleted document is still visible");
+        }
+        System.out.println("Verified document " + first.documentId() + " with versions 1 and 2, metadata, archive and logical deletion");
     }
 
     private static ContentSha256 checksum(byte[] bytes) {

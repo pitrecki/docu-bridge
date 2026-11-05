@@ -3,6 +3,7 @@ package io.github.pitrecki.dokubridge.autoconfigure;
 import io.github.pitrecki.dokubridge.adapter.filesystem.FilesystemDocumentContentStore;
 import io.github.pitrecki.dokubridge.adapter.jpa.JpaBusinessDocumentRepository;
 import io.github.pitrecki.dokubridge.adapter.jpa.JpaDocumentAuditRepository;
+import io.github.pitrecki.dokubridge.adapter.jpa.JpaDocumentLifecycleRepository;
 import io.github.pitrecki.dokubridge.adapter.jpa.JpaDocumentUploadRepository;
 import io.github.pitrecki.dokubridge.adapter.jpa.JpaDocumentVersionRepository;
 import io.github.pitrecki.dokubridge.core.application.DefaultDocumentBridge;
@@ -10,6 +11,7 @@ import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
 import io.github.pitrecki.dokubridge.core.port.out.BusinessDocumentRepository;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentAuditRepository;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentContentStore;
+import io.github.pitrecki.dokubridge.core.port.out.DocumentLifecycleRepository;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentUploadRepository;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentVersionRepository;
 import jakarta.persistence.EntityManager;
@@ -79,10 +81,16 @@ public class DokuBridgeAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(DocumentLifecycleRepository.class)
+    DocumentLifecycleRepository dokubridgeLifecycle(EntityManagerFactory factory, PlatformTransactionManager transactions) {
+        return new JpaDocumentLifecycleRepository(entities(factory, transactions), transactions);
+    }
+
+    @Bean
     @ConditionalOnMissingBean(DocumentBridge.class)
     DocumentBridge dokubridgeBridge(BusinessDocumentRepository documents, DocumentVersionRepository versions,
-                                   DocumentContentStore content, DocumentUploadRepository uploads) {
-        return new DefaultDocumentBridge(documents, versions, content, uploads);
+                                   DocumentContentStore content, DocumentUploadRepository uploads, DocumentLifecycleRepository lifecycle) {
+        return new DefaultDocumentBridge(documents, versions, content, uploads, lifecycle);
     }
 
     private EntityManager entities(EntityManagerFactory factory, PlatformTransactionManager transactions) {

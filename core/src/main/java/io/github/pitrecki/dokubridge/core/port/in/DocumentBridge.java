@@ -14,6 +14,21 @@ import java.util.UUID;
 
 /** Application-facing document facade. The host application owns authorization. */
 public interface DocumentBridge {
+    /** Replaces metadata with revision conflict detection; each accepted update advances the revision. */
+    default BusinessDocument updateMetadata(UpdateMetadata command) {
+        throw new UnsupportedOperationException("Document lifecycle operations are not configured");
+    }
+
+    /** Archives an active document; an already archived document is returned unchanged. */
+    default BusinessDocument archive(Archive command) {
+        throw new UnsupportedOperationException("Document lifecycle operations are not configured");
+    }
+
+    /** Hides a document while retaining content/history. Repeating deletion does not add another audit. */
+    default void delete(Delete command) {
+        throw new UnsupportedOperationException("Document lifecycle operations are not configured");
+    }
+
     /** Reserves and uploads a first version; matching replays return its current state without consuming content. */
     default DocumentVersion attach(AttachDocument command) throws IOException {
         throw new UnsupportedOperationException("Uploads are not configured");

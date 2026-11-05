@@ -11,8 +11,8 @@ import java.util.UUID;
 public class DocumentAuditEntity {
     @Id private UUID id;
     @Column(name = "document_id", nullable = false) private UUID documentId;
-    @Column(name = "version_id", nullable = false) private UUID versionId;
-    @Column(name = "request_id", nullable = false) private UUID requestId;
+    @Column(name = "version_id") private UUID versionId;
+    @Column(name = "request_id") private UUID requestId;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32) private DocumentAuditAction action;
     @Column(name = "occurred_at", nullable = false) private Instant occurredAt;
@@ -22,12 +22,17 @@ public class DocumentAuditEntity {
     }
 
     public DocumentAuditEntity(UUID documentId, UUID versionId, UUID requestId, DocumentAuditAction action) {
-        this.id = UUID.randomUUID();
-        this.documentId = documentId;
-        this.versionId = versionId;
-        this.requestId = requestId;
-        this.action = action;
-        this.occurredAt = Instant.now();
+        var entry = new DocumentAuditEntry(UUID.randomUUID(), documentId, versionId, requestId, action, Instant.now());
+        this.id = entry.id();
+        this.documentId = entry.documentId();
+        this.versionId = entry.versionId();
+        this.requestId = entry.requestId();
+        this.action = entry.action();
+        this.occurredAt = entry.occurredAt();
+    }
+
+    public DocumentAuditEntity(UUID documentId, DocumentAuditAction action) {
+        this(documentId, null, null, action);
     }
 
     public DocumentAuditEntry snapshot() {

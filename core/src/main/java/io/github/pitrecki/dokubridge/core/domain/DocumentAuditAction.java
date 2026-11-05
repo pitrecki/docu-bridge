@@ -1,8 +1,21 @@
 package io.github.pitrecki.dokubridge.core.domain;
 
 public enum DocumentAuditAction {
-    DOCUMENT_ATTACHED,
-    VERSION_ADDED,
-    UPLOAD_SUCCEEDED,
-    UPLOAD_FAILED
+    DOCUMENT_ATTACHED(true),
+    VERSION_ADDED(true),
+    UPLOAD_SUCCEEDED(true),
+    UPLOAD_FAILED(true),
+    METADATA_UPDATED(false),
+    DOCUMENT_ARCHIVED(false),
+    DOCUMENT_DELETED(false);
+
+    private final boolean requiresUploadContext;
+
+    DocumentAuditAction(boolean requiresUploadContext) {
+        this.requiresUploadContext = requiresUploadContext;
+    }
+
+    public boolean requiresUploadContext() {
+        return requiresUploadContext;
+    }
 }

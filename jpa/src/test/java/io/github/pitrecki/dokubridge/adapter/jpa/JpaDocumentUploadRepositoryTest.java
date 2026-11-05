@@ -59,7 +59,7 @@ class JpaDocumentUploadRepositoryTest {
         var dataSource = new DriverManagerDataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
         var flyway = Flyway.configure().dataSource(dataSource)
                 .locations("classpath:db/dokubridge").table("dokubridge_flyway_history").load();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
         assertThat(flyway.migrate().migrationsExecuted).isZero();
         flyway.validate();
         factory = new LocalContainerEntityManagerFactoryBean();

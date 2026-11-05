@@ -11,10 +11,14 @@ import io.github.pitrecki.dokubridge.core.domain.exception.DocumentContentUnavai
 import io.github.pitrecki.dokubridge.core.domain.exception.DocumentNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.exception.DocumentVersionNotFoundException;
 import io.github.pitrecki.dokubridge.core.port.in.AddDocumentVersion;
+import io.github.pitrecki.dokubridge.core.port.in.Archive;
 import io.github.pitrecki.dokubridge.core.port.in.AttachDocument;
+import io.github.pitrecki.dokubridge.core.port.in.Delete;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
+import io.github.pitrecki.dokubridge.core.port.in.UpdateMetadata;
 import io.github.pitrecki.dokubridge.core.port.out.BusinessDocumentRepository;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentContentStore;
+import io.github.pitrecki.dokubridge.core.port.out.DocumentLifecycleRepository;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentUploadRepository;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentVersionRepository;
 import io.github.pitrecki.dokubridge.core.port.out.UploadReservation;
@@ -32,6 +36,7 @@ public final class DefaultDocumentBridge implements DocumentBridge {
     private final DocumentVersionRepository versions;
     private final DocumentContentStore content;
     private final DocumentUploadRepository uploads;
+    private final DocumentLifecycleRepository lifecycle;
 
     public DefaultDocumentBridge(BusinessDocumentRepository documents, DocumentVersionRepository versions,
                                  DocumentContentStore content) {
@@ -39,6 +44,7 @@ public final class DefaultDocumentBridge implements DocumentBridge {
         this.versions = Objects.requireNonNull(versions, "Version repository must not be null");
         this.content = Objects.requireNonNull(content, "Content store must not be null");
         this.uploads = null;
+        this.lifecycle = null;
     }
 
     public DefaultDocumentBridge(BusinessDocumentRepository documents, DocumentVersionRepository versions,
@@ -47,6 +53,40 @@ public final class DefaultDocumentBridge implements DocumentBridge {
         this.versions = Objects.requireNonNull(versions, "Version repository must not be null");
         this.content = Objects.requireNonNull(content, "Content store must not be null");
         this.uploads = Objects.requireNonNull(uploads, "Upload repository must not be null");
+        this.lifecycle = null;
+    }
+
+    public DefaultDocumentBridge(BusinessDocumentRepository documents, DocumentVersionRepository versions,
+                                 DocumentContentStore content, DocumentUploadRepository uploads,
+                                 DocumentLifecycleRepository lifecycle) {
+        this.documents = Objects.requireNonNull(documents, "Document repository must not be null");
+        this.versions = Objects.requireNonNull(versions, "Version repository must not be null");
+        this.content = Objects.requireNonNull(content, "Content store must not be null");
+        this.uploads = Objects.requireNonNull(uploads, "Upload repository must not be null");
+        this.lifecycle = Objects.requireNonNull(lifecycle, "Lifecycle repository must not be null");
+    }
+
+    @Override
+    public BusinessDocument updateMetadata(UpdateMetadata command) {
+        Objects.requireNonNull(command, "Metadata command must not be null");
+        return lifecycleRepository().updateMetadata(command.documentId(), command.expectedRevision(), command.metadata());
+    }
+
+    @Override
+    public BusinessDocument archive(Archive command) {
+        Objects.requireNonNull(command, "Archive command must not be null");
+        return lifecycleRepository().archive(command.documentId());
+    }
+
+    @Override
+    public void delete(Delete command) {
+        Objects.requireNonNull(command, "Delete command must not be null");
+        lifecycleRepository().delete(command.documentId());
+    }
+
+    private DocumentLifecycleRepository lifecycleRepository() {
+        if (lifecycle == null) throw new UnsupportedOperationException("Document lifecycle operations require a DocumentLifecycleRepository");
+        return lifecycle;
     }
 
     @Override

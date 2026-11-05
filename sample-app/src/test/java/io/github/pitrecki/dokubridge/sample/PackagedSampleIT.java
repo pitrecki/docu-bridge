@@ -51,8 +51,19 @@ class PackagedSampleIT {
         assertThat(count("dokubridge_documents")).isEqualTo(2);
         assertThat(count("dokubridge_versions")).isEqualTo(4);
         assertThat(count("dokubridge_upload_requests")).isEqualTo(4);
-        assertThat(count("dokubridge_audit")).isEqualTo(8);
-        assertThat(count("dokubridge_flyway_history")).isEqualTo(1);
+        assertThat(count("dokubridge_audit")).isEqualTo(14);
+        assertThat(count("dokubridge_flyway_history")).isEqualTo(2);
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            try (var result = statement.executeQuery("select count(*) from dokubridge_documents where state = 'DELETED' and revision = 3")) {
+                result.next();
+                assertThat(result.getLong(1)).isEqualTo(2);
+            }
+            try (var result = statement.executeQuery("select count(*) from dokubridge_audit where version_id is null and request_id is null")) {
+                result.next();
+                assertThat(result.getLong(1)).isEqualTo(6);
+            }
+        }
         try (var files = Files.list(directory.resolve("content"))) {
             assertThat(files).hasSize(4);
         }

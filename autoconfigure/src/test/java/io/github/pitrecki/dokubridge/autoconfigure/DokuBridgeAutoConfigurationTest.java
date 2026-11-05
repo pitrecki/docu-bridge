@@ -2,15 +2,20 @@ package io.github.pitrecki.dokubridge.autoconfigure;
 
 import io.github.pitrecki.dokubridge.adapter.filesystem.FilesystemDocumentContentStore;
 import io.github.pitrecki.dokubridge.adapter.jpa.JpaBusinessDocumentRepository;
+import io.github.pitrecki.dokubridge.adapter.jpa.JpaDocumentLifecycleRepository;
 import io.github.pitrecki.dokubridge.core.domain.BusinessDocument;
 import io.github.pitrecki.dokubridge.core.domain.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.DocumentOwnerRef;
 import io.github.pitrecki.dokubridge.core.domain.DocumentVersionState;
 import io.github.pitrecki.dokubridge.core.port.in.AttachDocument;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
+import io.github.pitrecki.dokubridge.core.port.in.UpdateMetadata;
+import io.github.pitrecki.dokubridge.core.port.in.Archive;
+import io.github.pitrecki.dokubridge.core.port.in.Delete;
 import io.github.pitrecki.dokubridge.core.port.out.BusinessDocumentRepository;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentAuditRepository;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentContentStore;
+import io.github.pitrecki.dokubridge.core.port.out.DocumentLifecycleRepository;
 import io.github.pitrecki.dokubridge.testentities.AllowedRecord;
 import io.github.pitrecki.dokubridge.testhost.ExplicitHostConfiguration;
 import io.github.pitrecki.dokubridge.testhost.HostConfiguration;
@@ -97,9 +102,16 @@ class DokuBridgeAutoConfigurationTest {
                 assertThat(content.read()).isEqualTo(42);
             }
             assertThat(context.getBean(DocumentAuditRepository.class).findByDocument(version.documentId())).hasSize(2);
+            var changed = bridge.updateMetadata(new UpdateMetadata(version.documentId(), 0, Map.of("updated", true)));
+            assertThat(changed.revision()).isEqualTo(1);
+            assertThat(bridge.archive(new Archive(version.documentId())).revision()).isEqualTo(2);
+            bridge.delete(new Delete(version.documentId()));
+            bridge.delete(new Delete(version.documentId()));
+            assertThat(bridge.get(version.documentId())).isEmpty();
+            assertThat(context.getBean(DocumentAuditRepository.class).findByDocument(version.documentId())).hasSize(5);
             assertThat(count("host_record")).isEqualTo(1);
             assertThat(count("flyway_schema_history")).isEqualTo(1);
-            assertThat(count("dokubridge_flyway_history")).isEqualTo(2);
+            assertThat(count("dokubridge_flyway_history")).isEqualTo(3);
         });
     }
 
@@ -152,6 +164,19 @@ class DokuBridgeAutoConfigurationTest {
     }
 
     @Test
+    void customLifecyclePortBacksOffItsJpaAdapter() {
+        var custom = new DocumentLifecycleRepository() {
+            public BusinessDocument updateMetadata(UUID id, long revision, Map<String, Object> metadata) { throw new UnsupportedOperationException(); }
+            public BusinessDocument archive(UUID id) { throw new UnsupportedOperationException(); }
+            public void delete(UUID id) { }
+        };
+        runner().withBean(DocumentLifecycleRepository.class, () -> custom).run(context -> {
+            assertThat(context).hasNotFailed().doesNotHaveBean(JpaDocumentLifecycleRepository.class);
+            assertThat(context.getBean(DocumentLifecycleRepository.class)).isSameAs(custom);
+        });
+    }
+
+    @Test
     void enabledFalseLeavesHostJpaAndFlywayRunningWithoutLibraryTables() {
         runner().withPropertyValues("dokubridge.enabled=false").run(context -> {
             assertThat(context).hasNotFailed().doesNotHaveBean(DocumentBridge.class)
@@ -188,7 +213,7 @@ class DokuBridgeAutoConfigurationTest {
         runner().run(context -> {
             assertThat(context).hasNotFailed();
             assertThat(count("host_record")).isEqualTo(1);
-            assertThat(count("dokubridge_flyway_history")).isEqualTo(2);
+            assertThat(count("dokubridge_flyway_history")).isEqualTo(3);
         });
     }
 

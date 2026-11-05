@@ -54,9 +54,10 @@ Correct state transitions and failure handling matter more than adding features.
 ## Read facade
 
 `core.port.in.DocumentBridge` is the inbound port. Its implementation,
-`core.application.DefaultDocumentBridge`, depends
-only on `BusinessDocumentRepository`, `DocumentVersionRepository` and
-`DocumentContentStore`, all defined in `core`. The `jpa` module implements
+`core.application.DefaultDocumentBridge`, uses `BusinessDocumentRepository`,
+`DocumentVersionRepository` and `DocumentContentStore` for reads. Writes use the
+additional `DocumentUploadRepository` and `DocumentLifecycleRepository` ports,
+also defined in `core`. The `jpa` module implements
 the repository ports outside the core. Types live in `core.domain` and
 `core.domain.exception`; infrastructure contracts live in `core.port.out`. The
 `filesystem` module implements
@@ -123,14 +124,15 @@ no recovery scheduler or reconciliation API is provided yet.
 
 The original three-port `DefaultDocumentBridge` constructor remains read-only.
 Use its four-port constructor with `DocumentUploadRepository` to enable uploads.
-Default interface write methods reject unsupported uploads for existing external
-read-only implementations.
+The five-port constructor additionally enables metadata and lifecycle mutations.
+Default interface write methods reject unsupported operations for existing external
+implementations.
 
 ## PostgreSQL persistence
 
 The `jpa` module contains `JpaBusinessDocumentRepository`,
-`JpaDocumentVersionRepository`, `JpaDocumentAuditRepository` and
-`JpaDocumentUploadRepository`. Its runtime dependencies provide Spring ORM
+`JpaDocumentVersionRepository`, `JpaDocumentAuditRepository`,
+`JpaDocumentUploadRepository` and `JpaDocumentLifecycleRepository`. Its runtime dependencies provide Spring ORM
 transaction boundaries, Hibernate JPA, Jackson JSON encoding, PostgreSQL JDBC
 and Flyway migrations. The core has no new runtime dependencies. Adapters live in `adapter.jpa`, with
 entities and JSON mapping in `adapter.jpa.persistence`; the filesystem adapter
@@ -180,6 +182,59 @@ Both `ACTIVE` and `ARCHIVED` documents accept new versions. `DELETED` documents
 reject new requests as missing. A matching replay of an existing request returns
 its already reserved version without allocating another one, even after a document
 state change; download visibility is still enforced separately by the read facade.
+
+## Document lifecycle
+
+`UpdateMetadata(documentId, expectedRevision, metadata)` replaces the entire map;
+an empty map clears it. Both active and archived documents permit replacement.
+Every accepted replacement advances `BusinessDocument.revision`, including an
+identical replacement. A stale expected revision raises
+`DocumentRevisionConflictException` without a document change or audit. Retrying
+the original command after success therefore conflicts; clients must reread the
+snapshot before deciding whether another update is appropriate.
+
+Revisions start at 0. The original four-argument `BusinessDocument` constructor
+remains available and defaults to 0. Revision advances for metadata replacements
+and actual lifecycle transitions; allocation/finalization of content versions does
+not advance it. Negative revisions are invalid and exhaustion raises an error.
+The field is a logical concurrency token, not a JPA `@Version` field.
+
+`archive(Archive)` changes `ACTIVE` to `ARCHIVED`. Repeating archive returns the
+current snapshot without advancing revision or adding another audit.
+`delete(Delete)` changes active or archived documents to `DELETED`; repeating a
+known deletion is a no-op. A missing document id raises `DocumentNotFoundException`.
+Archive and metadata updates on deleted documents also report not found.
+
+Deletion is logical: owner, metadata, version rows, binary content, upload request
+keys and audit history remain retained. Reads hide the document. New upload
+requests for it are rejected; a previously reserved upload may finish, but its
+content stays hidden. Existing upload replays keep their durable-result semantics,
+including after metadata changes or deletion; a replay never restores a document
+or overwrites current metadata. There is no unarchive, physical purge or implicit
+retention cleanup operation.
+
+`DocumentLifecycleRepository` commits each change and its audit together. Its JPA
+adapter locks the same document row used for version allocation and uses short
+`READ COMMITTED` transactions. Concurrent metadata replacements with the same
+expected revision have one winner. State-command duplicates produce one transition
+and one audit. Write adapters explicitly refresh locked document/version entities
+before checking conditions, so a retained host persistence context cannot bypass
+revision checks, resurrect a deleted document, or refinalize a terminal version. Lifecycle calls reject an enclosing host transaction, consistent
+with uploads; the port performs no binary I/O.
+
+`METADATA_UPDATED`, `DOCUMENT_ARCHIVED` and `DOCUMENT_DELETED` audits have null
+`versionId` and `requestId`; they describe the document, not an upload. Existing
+upload audit actions still require both identifiers. Consumers should inspect the
+action's `requiresUploadContext()` before reading these fields. Metadata values
+are not copied into the audit. Revision checks, state transitions and audits roll
+back together if any persistence step fails.
+
+Migration V2 adds revision 0 to existing documents and relaxes audit identifiers
+only for document actions using a database check constraint. V1 is unchanged.
+The upgrade test migrates populated V1 data and verifies retained metadata,
+version ids, request fingerprints and upload audit references. Apply V2 before
+running this version with JPA schema validation; Boot's optional library initializer
+performs that upgrade when enabled.
 
 ## Spring Boot integration
 
@@ -239,4 +294,4 @@ Reconciliation and safe cleanup of interrupted uploads are not implemented yet.
 
 ## Open decisions
 
-Cleanup/reconciliation after partially completed uploads and physical deletion/retention policy remain open. Metadata updates, archive/delete operations and their transaction/audit contracts remain to be implemented. Spring Boot integration and the console sample are implemented; these remaining domain operations are not. No framework or new module should be introduced solely to pre-empt these decisions.
+Cleanup/reconciliation after partially completed uploads and physical deletion/retention policy remain open. Metadata updates, archive and logical deletion are implemented. Automatic recovery and physical retention/purge remain outside the current implementation. No framework or new module should be introduced solely to pre-empt these decisions.

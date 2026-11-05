@@ -14,7 +14,7 @@ Requires JDK 21 and network access to Maven Central on the first build.
 The `core` module contains the domain snapshots, immutable JSON metadata and the
 facade `DocumentBridge`, implemented by `DefaultDocumentBridge`. Its outbound
 ports are `BusinessDocumentRepository`, `DocumentVersionRepository`,
-`DocumentContentStore` and `DocumentUploadRepository`.
+`DocumentContentStore`, `DocumentUploadRepository` and `DocumentLifecycleRepository`.
 The `filesystem` module provides immutable local content storage. Neither module
 adds third-party runtime dependencies. The `jpa` module supplies PostgreSQL-backed
 persistence adapters, Flyway migrations and short upload reservation/finalization
@@ -52,7 +52,7 @@ these roles, enforced by ArchUnit tests in each module:
 core/
   core.domain/               document model, metadata and checksums
     exception/               domain errors
-  core.port.in/              DocumentBridge, AttachDocument, AddDocumentVersion
+  core.port.in/              DocumentBridge and document commands
   core.port.out/             repository and content-store contracts
   core.application/          DefaultDocumentBridge and request fingerprinting
 filesystem/
@@ -79,13 +79,16 @@ flowchart LR
     Service --> Versions[DocumentVersionRepository]
     Service --> Content[DocumentContentStore]
     Service --> Uploads[DocumentUploadRepository]
+    Service --> Lifecycle[DocumentLifecycleRepository]
     Filesystem[FilesystemDocumentContentStore] -. implements .-> Content
     JPA[JPA repository adapters] -. implements .-> Documents
     JPA -. implements .-> Versions
     JPA -. implements .-> Uploads
+    JPA -. implements .-> Lifecycle
 ```
 
-The facade exposes `attach`, `addVersion`, `get`, `findByOwner` and `getContent`.
+The facade exposes `attach`, `addVersion`, `updateMetadata`, `archive`, `delete`,
+`get`, `findByOwner` and `getContent`.
 Active and archived documents are readable; deleted documents appear absent. Content is available
 only for an `AVAILABLE` version belonging to the requested document, regardless
 of whether bytes already exist in storage. The host application authorizes callers
@@ -109,13 +112,37 @@ verifies new streams, while PostgreSQL atomically claims requests, assigns versi
 numbers and records audits. Matching replays return the current version without
 reading or writing bytes again. JSON object key order and numeric scale do not
 create false conflicts. Both active and archived documents accept new versions.
-The original three-port facade constructor remains read-only; pass a fourth
-`DocumentUploadRepository` argument to enable uploads.
+The original three-port facade constructor remains read-only. Pass a fourth
+`DocumentUploadRepository` argument to enable uploads and a fifth
+`DocumentLifecycleRepository` to enable lifecycle mutations. The starter wires all
+five ports.
 
-Metadata updates, archive/delete commands and recovery/cleanup remain unimplemented. See
+Metadata replacement and logical lifecycle changes are atomic with their audits.
+Automatic recovery and physical retention/purge remain unimplemented. See
 [PROJECT.md](PROJECT.md#request-idempotency) for replay and checksum contracts and
 [PostgreSQL persistence](PROJECT.md#postgresql-persistence) for transaction setup.
 
+
+## Metadata and lifecycle
+
+```java
+var document = bridge.get(documentId).orElseThrow();
+var updated = bridge.updateMetadata(new UpdateMetadata(
+    document.id(), document.revision(), Map.of("category", "revised")));
+bridge.archive(new Archive(document.id()));
+bridge.delete(new Delete(document.id()));
+```
+
+Metadata is replaced completely, including on archived documents. The returned
+snapshot carries the next revision. A stale `expectedRevision` conflicts; an empty
+map clears metadata. Content-version allocation does not advance document revision.
+
+Repeated archive/delete produces no additional change or audit. Deleted documents
+are hidden, while binary files, versions and history remain retained. A reserved
+upload can finish after deletion without making content visible. Document-only
+audit events have null version/request ids; upload audits retain both identifiers.
+See [PROJECT.md](PROJECT.md#document-lifecycle) for concurrency and retry semantics.
+Migration V2 upgrades existing V1 data without modifying the original migration.
 
 ## Spring Boot host setup
 
@@ -171,8 +198,9 @@ java -jar sample-app/target/dokubridge-sample-app-0.1.0-SNAPSHOT.jar
 
 The console application enables library schema initialization, validates the JPA
 schema, attaches a document, replays the request, adds version 2 and verifies its
-download through `DocumentBridge`. It prints the document id and exits. Each run
-creates another example document. It enables no HTTP endpoints and disables the
+download through `DocumentBridge`. It then replaces metadata, archives and
+logically deletes that example document, verifies read invisibility, prints its id
+and exits. Each run creates another retained, logically deleted example document. It enables no HTTP endpoints and disables the
 sample's separate host Flyway instance; these settings belong to the sample only.
 The packaged integration test supplies an isolated PostgreSQL container and checks
 two complete runs, retained data, migration history and stored files.

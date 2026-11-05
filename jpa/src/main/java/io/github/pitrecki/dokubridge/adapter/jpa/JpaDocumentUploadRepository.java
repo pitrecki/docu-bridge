@@ -66,7 +66,10 @@ public final class JpaDocumentUploadRepository implements DocumentUploadReposito
                 return replay(requestId, fingerprint);
             }
             var document = entities.find(BusinessDocumentEntity.class, documentId, LockModeType.PESSIMISTIC_WRITE);
-            if (document == null || document.state() == BusinessDocumentState.DELETED) {
+            if (document == null) throw new DocumentNotFoundException(documentId);
+            // Locking a first-level-cached entity does not reload its fields.
+            entities.refresh(document, LockModeType.PESSIMISTIC_WRITE);
+            if (document.state() == BusinessDocumentState.DELETED) {
                 throw new DocumentNotFoundException(documentId);
             }
             var version = new DocumentVersionEntity(versionId, documentId, document.allocateVersionNumber());
@@ -92,6 +95,7 @@ public final class JpaDocumentUploadRepository implements DocumentUploadReposito
                 throw new IllegalArgumentException("Version does not belong to the upload request");
             }
             var version = entities.find(DocumentVersionEntity.class, versionId, LockModeType.PESSIMISTIC_WRITE);
+            entities.refresh(version, LockModeType.PESSIMISTIC_WRITE);
             version.finalizeAs(outcome);
             audit(version, requestId, outcome == DocumentVersionState.AVAILABLE
                     ? DocumentAuditAction.UPLOAD_SUCCEEDED : DocumentAuditAction.UPLOAD_FAILED);
