@@ -181,6 +181,30 @@ reject new requests as missing. A matching replay of an existing request returns
 its already reserved version without allocating another one, even after a document
 state change; download visibility is still enforced separately by the read facade.
 
+## Spring Boot integration
+
+`autoconfigure` is the composition root. `DokuBridgeAutoConfiguration` registers
+default adapters and `DocumentBridge` for a Boot-managed JPA application; each
+port/facade bean backs off independently when the host provides that type. The
+configuration uses a shared entity manager and verifies that the selected
+`JpaTransactionManager` belongs to the same factory. Entity registration preserves
+the implicit host scan or its explicit `@EntityScan` without expanding the latter.
+A custom entity manager factory remains responsible for including library entities.
+
+`dokubridge.enabled=false` disables this integration. Filesystem storage requires
+an explicit `dokubridge.storage.root`, unless the host supplies its own content
+store. Library migration remains opt-in via `dokubridge.jpa.initialize-schema`.
+When enabled, migration runs after Boot's host Flyway initializers and before JPA
+initialization, in a separate library history table. Existing nonempty schemas
+receive a library baseline at 0; host migrations and history are retained. A
+library initializer is not a Flyway bean, so Boot can still configure host Flyway.
+
+`starter` bundles the Boot JPA and adapter dependencies without application logic.
+`sample-app` is a console client using the inbound port; its packaged JAR is tested
+in two fresh JVMs against the same PostgreSQL instance and content directory. It
+provides no web module. Spring configuration classes live in `autoconfigure`,
+separate from domain, ports, application services and adapters.
+
 ## Content storage contract
 
 `DocumentContentStore` streams immutable bytes under a version UUID. `store` rejects
@@ -215,4 +239,4 @@ Reconciliation and safe cleanup of interrupted uploads are not implemented yet.
 
 ## Open decisions
 
-Cleanup/reconciliation after partially completed uploads and physical deletion/retention policy remain open. Metadata updates, archive/delete operations and their transaction/audit contracts remain to be implemented. No framework or new module should be introduced solely to pre-empt these decisions.
+Cleanup/reconciliation after partially completed uploads and physical deletion/retention policy remain open. Metadata updates, archive/delete operations and their transaction/audit contracts remain to be implemented. Spring Boot integration and the console sample are implemented; these remaining domain operations are not. No framework or new module should be introduced solely to pre-empt these decisions.

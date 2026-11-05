@@ -10,6 +10,9 @@
     <module>core</module>
     <module>filesystem</module>
     <module>jpa</module>
+    <module>autoconfigure</module>
+    <module>starter</module>
+    <module>sample-app</module>
   </modules>
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
@@ -17,6 +20,7 @@
     <junit.version>5.11.4</junit.version>
     <assertj.version>3.27.3</assertj.version>
     <archunit.version>1.4.1</archunit.version>
+    <spring-boot.version>3.5.7</spring-boot.version>
   </properties>
   <dependencyManagement>
     <dependencies>

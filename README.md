@@ -18,7 +18,8 @@ ports are `BusinessDocumentRepository`, `DocumentVersionRepository`,
 The `filesystem` module provides immutable local content storage. Neither module
 adds third-party runtime dependencies. The `jpa` module supplies PostgreSQL-backed
 persistence adapters, Flyway migrations and short upload reservation/finalization
-transactions.
+transactions. `autoconfigure` wires these components in Spring Boot 3, `starter`
+provides host dependencies, and `sample-app` is an executable console example.
 
 `DocumentVersion` transitions only from `PENDING` to `AVAILABLE` or `FAILED`.
 Finalization returns a new snapshot; it does not persist state or store bytes.
@@ -30,9 +31,12 @@ filesystem with hard-link support. It publishes complete content under version
 UUIDs, rejects duplicate keys and refuses to read symbolic links. See
 [PROJECT.md](PROJECT.md#content-storage-contract) for failure and recovery limits.
 
-All modules build with the command above. The JPA tests require a running Docker
-daemon; Testcontainers starts and stops PostgreSQL 17.6 automatically. Tests fail
+All modules build with the command above. The PostgreSQL tests require a running
+Docker daemon; Testcontainers starts and stops PostgreSQL 17.6 automatically. Tests fail
 when Docker is unavailable rather than silently skipping persistence checks.
+`verify` also packages the sample and runs its mandatory Failsafe integration test,
+which launches the JAR twice in separate JVMs. The dependency-only starter has no
+unit tests; sample verification runs after packaging rather than in `test`.
 To run just the filesystem adapter and its core prerequisite:
 
 ```sh
@@ -56,6 +60,11 @@ filesystem/
 jpa/
   adapter.jpa/               Jpa*Repository implementations
     persistence/             JPA entities and JSONB mapping
+autoconfigure/
+  autoconfigure/             Spring Boot composition and configuration properties
+starter/                     dependency-only JAR
+sample-app/
+  sample/                    console client using the inbound port
 ```
 
 The flat `core` and `filesystem` public packages have been replaced by these
@@ -103,7 +112,67 @@ create false conflicts. Both active and archived documents accept new versions.
 The original three-port facade constructor remains read-only; pass a fourth
 `DocumentUploadRepository` argument to enable uploads.
 
-Metadata updates, archive/delete commands, recovery/cleanup, Spring Boot wiring and
-the sample application remain unimplemented. See
+Metadata updates, archive/delete commands and recovery/cleanup remain unimplemented. See
 [PROJECT.md](PROJECT.md#request-idempotency) for replay and checksum contracts and
 [PostgreSQL persistence](PROJECT.md#postgresql-persistence) for transaction setup.
+
+
+## Spring Boot host setup
+
+Build and install the project locally with `./mvnw install`, then add the starter:
+
+```xml
+<dependency>
+  <groupId>io.github.pitrecki.dokubridge</groupId>
+  <artifactId>dokubridge-starter</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+Configure a PostgreSQL data source through normal Spring Boot properties and set
+`dokubridge.storage.root` to a private application-controlled directory. Inject
+`core.port.in.DocumentBridge` to use the library. The default repositories require
+the selected entity manager factory's `JpaTransactionManager`; upload calls must
+run outside host transactions.
+
+| Property | Default | Behavior |
+| --- | --- | --- |
+| `dokubridge.enabled` | `true` | Enables library entity registration and default beans. |
+| `dokubridge.storage.root` | unset | Required unless a `DocumentContentStore` bean is supplied. |
+| `dokubridge.jpa.initialize-schema` | `false` | Runs the library Flyway migrations before JPA initialization. |
+
+Host beans replace the corresponding default ports or facade. The entity scan
+adds library entities while retaining the host's implicit scan or explicit
+`@EntityScan`. Custom entity manager factories must include the library persistence
+package themselves. Use a single or primary data source, entity manager factory
+and transaction manager.
+
+If the host already manages library migrations, leave schema initialization off.
+Otherwise enable `dokubridge.jpa.initialize-schema=true`. The initializer waits for
+Boot's host Flyway migrations, then uses its own `dokubridge_flyway_history` table.
+For an existing host schema it creates a library-only baseline at version 0 before
+running V1. It does not expose a competing Flyway bean or replace host history.
+
+## Run the sample
+
+The sample requires these environment variables for a development PostgreSQL
+instance and content directory:
+
+- `SPRING_DATASOURCE_URL`
+- `SPRING_DATASOURCE_USERNAME`
+- `SPRING_DATASOURCE_PASSWORD`
+- `DOKUBRIDGE_STORAGE_ROOT`
+
+After `./mvnw verify`:
+
+```sh
+java -jar sample-app/target/dokubridge-sample-app-0.1.0-SNAPSHOT.jar
+```
+
+The console application enables library schema initialization, validates the JPA
+schema, attaches a document, replays the request, adds version 2 and verifies its
+download through `DocumentBridge`. It prints the document id and exits. Each run
+creates another example document. It enables no HTTP endpoints and disables the
+sample's separate host Flyway instance; these settings belong to the sample only.
+The packaged integration test supplies an isolated PostgreSQL container and checks
+two complete runs, retained data, migration history and stored files.
