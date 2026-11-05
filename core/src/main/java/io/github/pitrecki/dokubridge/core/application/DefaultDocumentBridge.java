@@ -1,6 +1,7 @@
 package io.github.pitrecki.dokubridge.core.application;
 
 import io.github.pitrecki.dokubridge.core.application.upload.DocumentUploads;
+import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentContentUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocumentState;
@@ -16,6 +17,7 @@ import io.github.pitrecki.dokubridge.core.port.in.document.UpdateMetadata;
 import io.github.pitrecki.dokubridge.core.port.in.upload.AddDocumentVersion;
 import io.github.pitrecki.dokubridge.core.port.in.upload.AttachDocument;
 import io.github.pitrecki.dokubridge.core.port.in.upload.ReconcileUpload;
+import io.github.pitrecki.dokubridge.core.port.out.audit.DocumentAuditRepository;
 import io.github.pitrecki.dokubridge.core.port.out.content.DocumentContentStore;
 import io.github.pitrecki.dokubridge.core.port.out.document.BusinessDocumentRepository;
 import io.github.pitrecki.dokubridge.core.port.out.document.DocumentLifecycleRepository;
@@ -35,12 +37,25 @@ public final class DefaultDocumentBridge implements DocumentBridge {
     private final DocumentContentStore content;
     private final DocumentUploads uploads;
     private final DocumentLifecycleRepository lifecycle;
+    private final DocumentAuditRepository audits;
 
     public DefaultDocumentBridge(BusinessDocumentRepository documents, DocumentVersionRepository versions,
                                  DocumentContentStore content) {
         this.documents = Objects.requireNonNull(documents, "Document repository must not be null");
         this.versions = Objects.requireNonNull(versions, "Version repository must not be null");
         this.content = Objects.requireNonNull(content, "Content store must not be null");
+        this.uploads = null;
+        this.lifecycle = null;
+        this.audits = null;
+    }
+
+    /** Read-only composition with audit history; repository arguments precede content storage. */
+    public DefaultDocumentBridge(BusinessDocumentRepository documents, DocumentVersionRepository versions,
+                                 DocumentAuditRepository audits, DocumentContentStore content) {
+        this.documents = Objects.requireNonNull(documents, "Document repository must not be null");
+        this.versions = Objects.requireNonNull(versions, "Version repository must not be null");
+        this.content = Objects.requireNonNull(content, "Content store must not be null");
+        this.audits = Objects.requireNonNull(audits, "Audit repository must not be null");
         this.uploads = null;
         this.lifecycle = null;
     }
@@ -52,6 +67,7 @@ public final class DefaultDocumentBridge implements DocumentBridge {
         this.content = Objects.requireNonNull(content, "Content store must not be null");
         this.uploads = new DocumentUploads(this.content, Objects.requireNonNull(uploads, "Upload repository must not be null"));
         this.lifecycle = null;
+        this.audits = null;
     }
 
     public DefaultDocumentBridge(BusinessDocumentRepository documents, DocumentVersionRepository versions,
@@ -62,6 +78,18 @@ public final class DefaultDocumentBridge implements DocumentBridge {
         this.content = Objects.requireNonNull(content, "Content store must not be null");
         this.uploads = new DocumentUploads(this.content, Objects.requireNonNull(uploads, "Upload repository must not be null"));
         this.lifecycle = Objects.requireNonNull(lifecycle, "Lifecycle repository must not be null");
+        this.audits = null;
+    }
+
+    public DefaultDocumentBridge(BusinessDocumentRepository documents, DocumentVersionRepository versions,
+                                 DocumentContentStore content, DocumentUploadRepository uploads,
+                                 DocumentLifecycleRepository lifecycle, DocumentAuditRepository audits) {
+        this.documents = Objects.requireNonNull(documents, "Document repository must not be null");
+        this.versions = Objects.requireNonNull(versions, "Version repository must not be null");
+        this.content = Objects.requireNonNull(content, "Content store must not be null");
+        this.uploads = new DocumentUploads(this.content, Objects.requireNonNull(uploads, "Upload repository must not be null"));
+        this.lifecycle = Objects.requireNonNull(lifecycle, "Lifecycle repository must not be null");
+        this.audits = Objects.requireNonNull(audits, "Audit repository must not be null");
     }
 
     @Override
@@ -136,6 +164,16 @@ public final class DefaultDocumentBridge implements DocumentBridge {
         return versions.findByDocument(documentId).stream()
                 .filter(version -> version.documentId().equals(documentId))
                 .sorted(Comparator.comparingInt(DocumentVersion::number))
+                .toList();
+    }
+
+    @Override
+    public List<DocumentAuditEntry> getAudit(UUID documentId) {
+        Objects.requireNonNull(documentId, "Document id must not be null");
+        get(documentId).orElseThrow(() -> new DocumentNotFoundException(documentId));
+        if (audits == null) throw new UnsupportedOperationException("Audit history requires a DocumentAuditRepository");
+        return audits.findByDocument(documentId).stream()
+                .filter(entry -> entry.documentId().equals(documentId))
                 .toList();
     }
 

@@ -1,5 +1,7 @@
 package io.github.pitrecki.dokubridge.sample;
 
+import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditAction;
+import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
@@ -63,18 +65,25 @@ public class SampleApplication {
         }
         var history = bridge.getVersions(first.documentId());
         if (!history.equals(List.of(first, second))) throw new IllegalStateException("Version history differs");
+        if (bridge.getAudit(first.documentId()).size() != 4) throw new IllegalStateException("Active audit differs");
         var document = bridge.get(first.documentId()).orElseThrow();
         var updated = bridge.updateMetadata(new UpdateMetadata(document.id(), document.revision(), Map.of("category", "revised")));
         var archived = bridge.archive(new Archive(document.id()));
         if (archived.revision() != updated.revision() + 1) throw new IllegalStateException("Archive revision differs");
         if (!bridge.getVersions(document.id()).equals(history)) throw new IllegalStateException("Archived history differs");
+        var actions = bridge.getAudit(document.id()).stream().map(DocumentAuditEntry::action).toList();
+        if (!actions.equals(List.of(DocumentAuditAction.DOCUMENT_ATTACHED, DocumentAuditAction.UPLOAD_SUCCEEDED,
+                DocumentAuditAction.VERSION_ADDED, DocumentAuditAction.UPLOAD_SUCCEEDED,
+                DocumentAuditAction.METADATA_UPDATED, DocumentAuditAction.DOCUMENT_ARCHIVED))) {
+            throw new IllegalStateException("Archived audit differs");
+        }
         bridge.delete(new Delete(document.id()));
         bridge.delete(new Delete(document.id()));
         if (bridge.get(document.id()).isPresent()
                 || bridge.findByOwner(owner).stream().anyMatch(candidate -> candidate.id().equals(document.id()))) {
             throw new IllegalStateException("Deleted document is still visible");
         }
-        System.out.println("Verified document " + first.documentId() + " with version history 1 and 2, metadata, archive and logical deletion");
+        System.out.println("Verified document " + first.documentId() + " with version history 1 and 2, audited events, metadata, archive and logical deletion");
     }
 
     private static ContentSha256 checksum(byte[] bytes) {

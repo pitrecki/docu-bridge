@@ -14,7 +14,7 @@ DokuBridge is a small embeddable library for attaching documents to business ent
 
 ## Public boundary
 
-`DocumentBridge` is the application-facing entry point. Its operation set covers `AttachDocument`, `AddDocumentVersion`, `UpdateMetadata`, `Archive`, `Delete`, `Get`, `GetContent`, `FindByOwner`, `GetVersions` and explicit `ReconcileUpload`. Commands and value objects carry input validation. Public contracts must not expose JPA or filesystem implementations.
+`DocumentBridge` is the application-facing entry point. Its operation set covers `AttachDocument`, `AddDocumentVersion`, `UpdateMetadata`, `Archive`, `Delete`, `Get`, `GetContent`, `FindByOwner`, `GetVersions`, `GetAudit` and explicit `ReconcileUpload`. Commands and value objects carry input validation. Public contracts must not expose JPA or filesystem implementations.
 
 The main model consists of `BusinessDocument`, `DocumentVersion`, `DocumentOwnerRef(type, id)` and a metadata map (`Map<String, Object>`). Audit records describe meaningful actions and upload failures.
 
@@ -55,7 +55,8 @@ Correct state transitions and failure handling matter more than adding features.
 
 `core.port.in.DocumentBridge` is the inbound port. Its implementation,
 `core.application.DefaultDocumentBridge`, uses `BusinessDocumentRepository`,
-`DocumentVersionRepository` and `DocumentContentStore` for reads. Writes use the
+`DocumentVersionRepository` and `DocumentContentStore` for reads, with an optional
+`DocumentAuditRepository` for audit history. Writes use the
 additional `DocumentUploadRepository` and `DocumentLifecycleRepository` ports,
 also defined in `core`. The `jpa` module implements
 the repository ports outside the core. Domain types and errors live in
@@ -97,12 +98,31 @@ JPA uses query projections ordered by version number, including with retained ho
 entities. Existing constructors and Boot wiring enable history when the supplied
 version port supports it; no new dependency, configuration or migration is needed.
 
+`getAudit(documentId)` returns an immutable snapshot of every document/upload
+event in repository insertion order. It preserves that order even when producer
+timestamps move backwards. Active and archived documents are visible; a missing,
+foreign or deleted document raises `DocumentNotFoundException` before the audit
+port is called. Foreign audit snapshots are filtered defensively. A visible
+document with no events has an empty list. Repository failures propagate rather
+than becoming empty histories. Reading adds no event and performs no binary I/O.
+The host authorizes access. There is no pagination or atomic snapshot spanning
+the visibility check and history query.
+
+`DocumentAuditRepository` remains the lower-level port for retained history,
+including deleted documents. Application-level reads use the facade's visibility
+checks. The audit-enabled read-only constructor takes `(documents, versions,
+audits, content)` and does not enable writes. Full composition adds `audits` after
+the existing five constructor arguments. Existing compositions remain usable with
+audit disabled; existing custom facades inherit an unsupported default `getAudit`.
+Boot supplies its selected audit port, including a host override. Audit reads need
+no schema or configuration change.
+
 These checks operate on repository snapshots. They do not lock a document during
 streaming, revoke an already opened stream on deletion, or authorize a caller.
 The host application remains responsible for authorization.
 
-The JPA document and version readers build snapshots from query projections rather
-than managed entities. A retained host persistence context therefore cannot supply
+The JPA document, version and audit readers build snapshots from query
+projections rather than managed entities. A retained host persistence context therefore cannot supply
 an obsolete document state, metadata revision or upload outcome. These reads do
 not clear or detach host entities. They still join an enclosing host transaction
 and obey its database isolation; a repeatable-read transaction can retain an older
@@ -157,8 +177,9 @@ or automatic orphan cleanup.
 The original three-port `DefaultDocumentBridge` constructor remains read-only.
 Use its four-port constructor with `DocumentUploadRepository` to enable uploads.
 The five-port constructor additionally enables metadata and lifecycle mutations.
-Default interface write methods reject unsupported operations for existing external
-implementations.
+The six-port constructor also enables audit reads; the audit-only read composition
+above remains available without write repositories. Default interface write
+methods reject unsupported operations for existing external implementations.
 
 ## PostgreSQL persistence
 

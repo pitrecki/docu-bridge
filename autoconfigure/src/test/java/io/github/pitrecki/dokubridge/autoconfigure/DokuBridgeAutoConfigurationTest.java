@@ -99,6 +99,7 @@ class DokuBridgeAutoConfigurationTest {
             assertThat(version.state()).isEqualTo(DocumentVersionState.AVAILABLE);
             assertThat(bridge.attach(command)).isEqualTo(version);
             assertThat(bridge.getVersions(version.documentId())).containsExactly(version);
+            assertThat(bridge.getAudit(version.documentId())).hasSize(2);
             try (var content = bridge.getContent(version.documentId(), version.id())) {
                 assertThat(content.read()).isEqualTo(42);
             }
@@ -110,6 +111,8 @@ class DokuBridgeAutoConfigurationTest {
             bridge.delete(new Delete(version.documentId()));
             assertThat(bridge.get(version.documentId())).isEmpty();
             assertThatThrownBy(() -> bridge.getVersions(version.documentId()))
+                    .isInstanceOf(io.github.pitrecki.dokubridge.core.domain.document.exception.DocumentNotFoundException.class);
+            assertThatThrownBy(() -> bridge.getAudit(version.documentId()))
                     .isInstanceOf(io.github.pitrecki.dokubridge.core.domain.document.exception.DocumentNotFoundException.class);
             assertThat(context.getBean(DocumentAuditRepository.class).findByDocument(version.documentId())).hasSize(5);
             assertThat(count("host_record")).isEqualTo(1);
@@ -164,6 +167,26 @@ class DokuBridgeAutoConfigurationTest {
             assertThat(context.getBean(BusinessDocumentRepository.class)).isSameAs(custom);
             assertThat(context).doesNotHaveBean(JpaBusinessDocumentRepository.class);
             assertThat(context).hasSingleBean(DocumentAuditRepository.class);
+        });
+    }
+
+    @Test
+    void customAuditPortIsUsedByTheFacadeWithoutItsJpaAdapter() {
+        var queried = new java.util.concurrent.atomic.AtomicReference<UUID>();
+        DocumentAuditRepository custom = id -> {
+            queried.set(id);
+            return List.of();
+        };
+        runner().withBean(DocumentAuditRepository.class, () -> custom).run(context -> {
+            assertThat(context).hasNotFailed().doesNotHaveBean(io.github.pitrecki.dokubridge.adapter.jpa.audit.JpaDocumentAuditRepository.class);
+            assertThat(context.getBean(DocumentAuditRepository.class)).isSameAs(custom);
+            var bridge = context.getBean(DocumentBridge.class);
+            byte[] bytes = {42};
+            var checksum = new ContentSha256(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)));
+            var version = bridge.attach(new AttachDocument(UUID.randomUUID(), new DocumentOwnerRef("Invoice", "audit-42"),
+                    Map.of(), checksum, new ByteArrayInputStream(bytes)));
+            assertThat(bridge.getAudit(version.documentId())).isEmpty();
+            assertThat(queried).hasValue(version.documentId());
         });
     }
 

@@ -1,8 +1,12 @@
 package io.github.pitrecki.dokubridge.core.port.in;
 
+import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
+import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentContentUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.document.exception.DocumentNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
+import io.github.pitrecki.dokubridge.core.domain.version.exception.DocumentVersionNotFoundException;
 import io.github.pitrecki.dokubridge.core.port.in.document.Archive;
 import io.github.pitrecki.dokubridge.core.port.in.document.Delete;
 import io.github.pitrecki.dokubridge.core.port.in.document.UpdateMetadata;
@@ -60,6 +64,11 @@ public interface DocumentBridge {
     /** Returns an immutable version history in number order, including pending and failed versions. */
     default List<DocumentVersion> getVersions(UUID documentId) {
         throw new UnsupportedOperationException("Version history is not configured");
+    }
+
+    /** Returns an immutable audit in insertion order; missing/deleted documents report not found. */
+    default List<DocumentAuditEntry> getAudit(UUID documentId) {
+        throw new UnsupportedOperationException("Audit history is not configured");
     }
 
     /**

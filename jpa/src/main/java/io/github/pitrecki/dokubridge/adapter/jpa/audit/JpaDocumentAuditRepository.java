@@ -1,6 +1,5 @@
 package io.github.pitrecki.dokubridge.adapter.jpa.audit;
 
-import io.github.pitrecki.dokubridge.adapter.jpa.audit.persistence.DocumentAuditEntity;
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import io.github.pitrecki.dokubridge.core.port.out.audit.DocumentAuditRepository;
 import jakarta.persistence.EntityManager;
@@ -23,9 +22,10 @@ public final class JpaDocumentAuditRepository implements DocumentAuditRepository
     @Override
     public List<DocumentAuditEntry> findByDocument(UUID documentId) {
         Objects.requireNonNull(documentId);
-        return read.execute(status -> entities.createQuery(
-                "select a from DocumentAuditEntity a where a.documentId = :id order by a.position",
-                DocumentAuditEntity.class).setParameter("id", documentId).getResultList().stream()
-                .map(DocumentAuditEntity::snapshot).toList());
+        return read.execute(status -> entities.createQuery("""
+                select new io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry(
+                    a.id, a.documentId, a.versionId, a.requestId, a.action, a.occurredAt)
+                from DocumentAuditEntity a where a.documentId = :id order by a.position
+                """, DocumentAuditEntry.class).setParameter("id", documentId).getResultList().stream().toList());
     }
 }

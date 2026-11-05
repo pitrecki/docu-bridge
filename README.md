@@ -116,15 +116,17 @@ flowchart LR
     Service --> Content[DocumentContentStore]
     Service --> Uploads[DocumentUploadRepository]
     Service --> Lifecycle[DocumentLifecycleRepository]
+    Service --> Audits[DocumentAuditRepository]
     Filesystem[FilesystemDocumentContentStore] -. implements .-> Content
     JPA[JPA repository adapters] -. implements .-> Documents
     JPA -. implements .-> Versions
     JPA -. implements .-> Uploads
     JPA -. implements .-> Lifecycle
+    JPA -. implements .-> Audits
 ```
 
 The facade exposes `attach`, `addVersion`, `updateMetadata`, `archive`, `delete`,
-`get`, `findByOwner`, `getVersions`, `getContent` and `reconcileUpload`.
+`get`, `findByOwner`, `getVersions`, `getAudit`, `getContent` and `reconcileUpload`.
 Active and archived documents are readable; deleted documents appear absent. Content is available
 only for an `AVAILABLE` version belonging to the requested document, regardless
 of whether bytes already exist in storage. The host application authorizes callers
@@ -148,10 +150,10 @@ verifies new streams, while PostgreSQL atomically claims requests, assigns versi
 numbers and records audits. Matching replays return the current version without
 reading or writing bytes again. JSON object key order and numeric scale do not
 create false conflicts. Both active and archived documents accept new versions.
-The original three-port facade constructor remains read-only. Pass a fourth
-`DocumentUploadRepository` argument to enable uploads and a fifth
-`DocumentLifecycleRepository` to enable lifecycle mutations. The starter wires all
-five ports.
+The original three-port facade constructor remains read-only. The existing
+upload constructor accepts `DocumentUploadRepository` as its fourth argument;
+its five-port variant also enables lifecycle mutations. Audit composition is
+shown below. The starter wires all six ports.
 
 Metadata replacement and logical lifecycle changes are atomic with their audits.
 Automatic recovery and physical retention/purge remain unimplemented. See
@@ -181,6 +183,43 @@ Custom repositories must implement it to support history; its default throws
 `UnsupportedOperationException`. Existing single-version implementations and
 custom facades remain usable after updating imports. JPA and the starter support
 history without new configuration or a database migration.
+
+## Audit history
+
+```java
+import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
+import java.util.List;
+
+List<DocumentAuditEntry> audit = bridge.getAudit(documentId);
+```
+
+The facade returns an immutable list of document and upload events in database
+insertion order. Timestamps may move backwards across producers and do not define
+this order. Active and archived documents are visible; missing or deleted
+documents raise `DocumentNotFoundException` before querying audit. No content is
+opened and reading history adds no event. The host authorizes access. The operation
+returns the full list without pagination, with the same snapshot/isolation limits
+as other reads.
+
+Upload actions carry version/request UUIDs; metadata, archive and delete actions
+have null values for both. Check `entry.action().requiresUploadContext()` before
+using those identifiers. Audit records contain no copied document metadata or
+binary content. The lower-level `DocumentAuditRepository` retains all events,
+including deletion history; its visibility is controlled by the host.
+
+For manual composition, inject the existing audit port:
+
+```java
+var readOnly = new DefaultDocumentBridge(documents, versions, audits, content);
+var full = new DefaultDocumentBridge(documents, versions, content, uploads, lifecycle, audits);
+```
+
+Repository arguments precede content in the audit-enabled read-only constructor,
+so the existing four-argument upload constructor remains usable. The original
+three-, four- and five-port compositions still work; they do not enable audit
+history. Custom facades inherit an unsupported default `getAudit` method. Boot
+passes the selected `DocumentAuditRepository` bean to the facade and respects a
+host-provided replacement. No new property, dependency or migration is required.
 
 ## Interrupted uploads
 
@@ -278,8 +317,8 @@ java -jar sample-app/target/dokubridge-sample-app-0.1.0-SNAPSHOT.jar
 
 The console application enables library schema initialization, validates the JPA
 schema, attaches a document, replays the request, adds version 2 and verifies its
-download and ordered version history through `DocumentBridge`. It then replaces metadata, archives and
-logically deletes that example document, verifies read invisibility, prints its id
+download, ordered version history and audit through `DocumentBridge`. It then
+replaces metadata, archives and logically deletes that example document, verifies read invisibility, prints its id
 and exits. Each run creates another retained, logically deleted example document. It enables no HTTP endpoints and disables the
 sample's separate host Flyway instance; these settings belong to the sample only.
 The packaged integration test supplies an isolated PostgreSQL container and checks

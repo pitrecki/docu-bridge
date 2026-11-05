@@ -43,7 +43,7 @@ class PackagedSampleIT {
                 assertThat(process.waitFor(60, TimeUnit.SECONDS)).as("Sample exits within 60 seconds").isTrue();
                 String output = Files.readString(log);
                 assertThat(process.exitValue()).withFailMessage(output).isZero();
-                assertThat(output).contains("Verified document ", "version history 1 and 2");
+                assertThat(output).contains("Verified document ", "version history 1 and 2", "audited events");
             } finally {
                 if (process.isAlive()) process.destroyForcibly().waitFor();
             }

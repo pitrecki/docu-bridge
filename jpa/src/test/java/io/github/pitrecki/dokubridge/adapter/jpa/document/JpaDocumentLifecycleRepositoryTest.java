@@ -389,7 +389,7 @@ class JpaDocumentLifecycleRepositoryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"get", "findByOwner", "getContent", "getVersions"})
+    @ValueSource(strings = {"get", "findByOwner", "getContent", "getVersions", "getAudit"})
     void retainedHostContextCannotExposeACommittedDeletion(String operation) throws Exception {
         var version = newDocument();
         var retained = factory.getObject().createEntityManager();
@@ -408,6 +408,8 @@ class JpaDocumentLifecycleRepositoryTest {
                 case "get" -> assertThat(guarded.get(version.documentId())).isEmpty();
                 case "findByOwner" -> assertThat(guarded.findByOwner(owner)).isEmpty();
                 case "getVersions" -> assertThatThrownBy(() -> guarded.getVersions(version.documentId()))
+                        .isInstanceOf(DocumentNotFoundException.class);
+                case "getAudit" -> assertThatThrownBy(() -> guarded.getAudit(version.documentId()))
                         .isInstanceOf(DocumentNotFoundException.class);
                 case "getContent" -> assertThatThrownBy(() -> guarded.getContent(version.documentId(), version.id()))
                         .isInstanceOf(DocumentNotFoundException.class);

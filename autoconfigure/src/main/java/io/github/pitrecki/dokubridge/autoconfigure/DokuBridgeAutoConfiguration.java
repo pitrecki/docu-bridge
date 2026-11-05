@@ -89,8 +89,9 @@ public class DokuBridgeAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(DocumentBridge.class)
     DocumentBridge dokubridgeBridge(BusinessDocumentRepository documents, DocumentVersionRepository versions,
-                                   DocumentContentStore content, DocumentUploadRepository uploads, DocumentLifecycleRepository lifecycle) {
-        return new DefaultDocumentBridge(documents, versions, content, uploads, lifecycle);
+                                   DocumentContentStore content, DocumentUploadRepository uploads,
+                                   DocumentLifecycleRepository lifecycle, DocumentAuditRepository audits) {
+        return new DefaultDocumentBridge(documents, versions, content, uploads, lifecycle, audits);
     }
 
     private EntityManager entities(EntityManagerFactory factory, PlatformTransactionManager transactions) {
