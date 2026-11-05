@@ -3,6 +3,7 @@ package io.github.pitrecki.dokubridge.adapter.jpa;
 import io.github.pitrecki.dokubridge.adapter.filesystem.FilesystemDocumentContentStore;
 import io.github.pitrecki.dokubridge.core.application.DefaultDocumentBridge;
 import io.github.pitrecki.dokubridge.core.domain.*;
+import io.github.pitrecki.dokubridge.core.domain.exception.DocumentContentUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.exception.DocumentNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.exception.DocumentRevisionConflictException;
 import io.github.pitrecki.dokubridge.core.port.in.*;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
@@ -370,6 +372,99 @@ class JpaDocumentLifecycleRepositoryTest {
             retained.close();
         }
         assertThat(audits.findByDocument(pending.documentId())).hasSize(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"get", "findByOwner", "getContent"})
+    void retainedHostContextCannotExposeACommittedDeletion(String operation) throws Exception {
+        var version = newDocument();
+        var retained = factory.getObject().createEntityManager();
+        try {
+            retained.find(io.github.pitrecki.dokubridge.adapter.jpa.persistence.BusinessDocumentEntity.class, version.documentId());
+            TransactionSynchronizationManager.bindResource(factory.getObject(), new org.springframework.orm.jpa.EntityManagerHolder(retained));
+            assertThat(bridge.get(version.documentId())).isPresent();
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                executor.submit(() -> bridge.delete(new Delete(version.documentId()))).get(20, TimeUnit.SECONDS);
+            }
+            var guarded = new DefaultDocumentBridge(documents, versions, new DocumentContentStore() {
+                public void store(UUID id, InputStream source) { throw new AssertionError("Unexpected upload"); }
+                public InputStream open(UUID id) { throw new AssertionError("Deleted content must not be opened"); }
+            });
+            switch (operation) {
+                case "get" -> assertThat(guarded.get(version.documentId())).isEmpty();
+                case "findByOwner" -> assertThat(guarded.findByOwner(owner)).isEmpty();
+                case "getContent" -> assertThatThrownBy(() -> guarded.getContent(version.documentId(), version.id()))
+                        .isInstanceOf(DocumentNotFoundException.class);
+                default -> throw new AssertionError("Unknown read operation");
+            }
+        } finally {
+            if (TransactionSynchronizationManager.hasResource(factory.getObject())) {
+                TransactionSynchronizationManager.unbindResource(factory.getObject());
+            }
+            retained.close();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"get", "findByOwner"})
+    void retainedHostContextReturnsCommittedMetadataRevisionAndState(String operation) throws Exception {
+        var version = newDocument();
+        var retained = factory.getObject().createEntityManager();
+        try {
+            retained.find(io.github.pitrecki.dokubridge.adapter.jpa.persistence.BusinessDocumentEntity.class, version.documentId());
+            TransactionSynchronizationManager.bindResource(factory.getObject(), new org.springframework.orm.jpa.EntityManagerHolder(retained));
+            assertThat(bridge.findByOwner(owner).getFirst().revision()).isZero();
+            BusinessDocument changed;
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                changed = executor.submit(() -> {
+                    bridge.updateMetadata(new UpdateMetadata(version.documentId(), 0, Map.of("new", true)));
+                    return bridge.archive(new Archive(version.documentId()));
+                }).get(20, TimeUnit.SECONDS);
+            }
+            var result = operation.equals("get") ? bridge.get(version.documentId()).orElseThrow()
+                    : bridge.findByOwner(owner).getFirst();
+            assertThat(result).isEqualTo(changed);
+            assertThat(result.revision()).isEqualTo(2);
+            assertThat(result.metadata()).containsOnlyKeys("new");
+            assertThat(result.state()).isEqualTo(BusinessDocumentState.ARCHIVED);
+        } finally {
+            if (TransactionSynchronizationManager.hasResource(factory.getObject())) {
+                TransactionSynchronizationManager.unbindResource(factory.getObject());
+            }
+            retained.close();
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DocumentVersionState.class, names = {"AVAILABLE", "FAILED"})
+    void retainedHostContextReturnsCommittedVersionOutcome(DocumentVersionState outcome) throws Exception {
+        var first = newDocument();
+        UUID request = UUID.randomUUID();
+        var pending = uploads.reserveVersion(request, "a".repeat(64), first.documentId()).version();
+        files.store(pending.id(), bytes());
+        var retained = factory.getObject().createEntityManager();
+        try {
+            retained.find(io.github.pitrecki.dokubridge.adapter.jpa.persistence.DocumentVersionEntity.class, pending.id());
+            TransactionSynchronizationManager.bindResource(factory.getObject(), new org.springframework.orm.jpa.EntityManagerHolder(retained));
+            assertThat(versions.findById(first.documentId(), pending.id())).contains(pending);
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                executor.submit(() -> uploads.complete(request, pending.id(), outcome)).get(20, TimeUnit.SECONDS);
+            }
+            assertThat(versions.findById(first.documentId(), pending.id()).orElseThrow().state()).isEqualTo(outcome);
+            if (outcome == DocumentVersionState.AVAILABLE) {
+                try (var input = bridge.getContent(first.documentId(), pending.id())) {
+                    assertThat(input.readAllBytes()).containsExactly((byte) 42);
+                }
+            } else {
+                assertThatThrownBy(() -> bridge.getContent(first.documentId(), pending.id()))
+                        .isInstanceOf(DocumentContentUnavailableException.class).hasMessageContaining("FAILED");
+            }
+        } finally {
+            if (TransactionSynchronizationManager.hasResource(factory.getObject())) {
+                TransactionSynchronizationManager.unbindResource(factory.getObject());
+            }
+            retained.close();
+        }
     }
 
     @Test

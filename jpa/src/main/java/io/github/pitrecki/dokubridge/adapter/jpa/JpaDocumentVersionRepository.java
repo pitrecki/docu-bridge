@@ -1,6 +1,5 @@
 package io.github.pitrecki.dokubridge.adapter.jpa;
 
-import io.github.pitrecki.dokubridge.adapter.jpa.persistence.DocumentVersionEntity;
 import io.github.pitrecki.dokubridge.core.domain.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentVersionRepository;
 import jakarta.persistence.EntityManager;
@@ -24,7 +23,10 @@ public final class JpaDocumentVersionRepository implements DocumentVersionReposi
     public Optional<DocumentVersion> findById(UUID documentId, UUID versionId) {
         Objects.requireNonNull(documentId);
         Objects.requireNonNull(versionId);
-        return read.execute(status -> Optional.ofNullable(entities.find(DocumentVersionEntity.class, versionId))
-                .filter(version -> version.documentId().equals(documentId)).map(DocumentVersionEntity::snapshot));
+        return read.execute(status -> entities.createQuery("""
+                select new io.github.pitrecki.dokubridge.core.domain.DocumentVersion(v.id, v.documentId, v.number, v.state)
+                from DocumentVersionEntity v where v.documentId = :document and v.id = :version
+                """, DocumentVersion.class).setParameter("document", documentId).setParameter("version", versionId)
+                .getResultList().stream().findFirst());
     }
 }

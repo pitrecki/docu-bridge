@@ -77,6 +77,14 @@ These checks operate on repository snapshots. They do not lock a document during
 streaming, revoke an already opened stream on deletion, or authorize a caller.
 The host application remains responsible for authorization.
 
+The JPA document and version readers build snapshots from query projections rather
+than managed entities. A retained host persistence context therefore cannot supply
+an obsolete document state, metadata revision or upload outcome. These reads do
+not clear or detach host entities. They still join an enclosing host transaction
+and obey its database isolation; a repeatable-read transaction can retain an older
+database snapshot. Deletion after a visibility check can still race an opened
+stream as described above.
+
 `BusinessDocument` snapshots include an immutable `Map<String,Object>` of JSON
 metadata. Accepted values are strings, booleans, nulls, finite numbers, nested maps
 with string keys and lists. Supported number classes are `Byte`, `Short`, `Integer`,

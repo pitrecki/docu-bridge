@@ -1,6 +1,6 @@
 package io.github.pitrecki.dokubridge.adapter.jpa;
 
-import io.github.pitrecki.dokubridge.adapter.jpa.persistence.BusinessDocumentEntity;
+import io.github.pitrecki.dokubridge.adapter.jpa.persistence.BusinessDocumentRow;
 import io.github.pitrecki.dokubridge.core.domain.BusinessDocument;
 import io.github.pitrecki.dokubridge.core.domain.DocumentOwnerRef;
 import io.github.pitrecki.dokubridge.core.port.out.BusinessDocumentRepository;
@@ -25,16 +25,22 @@ public final class JpaBusinessDocumentRepository implements BusinessDocumentRepo
     @Override
     public Optional<BusinessDocument> findById(UUID documentId) {
         Objects.requireNonNull(documentId);
-        return read.execute(status -> Optional.ofNullable(entities.find(BusinessDocumentEntity.class, documentId))
-                .map(BusinessDocumentEntity::snapshot));
+        return read.execute(status -> entities.createQuery("""
+                select new io.github.pitrecki.dokubridge.adapter.jpa.persistence.BusinessDocumentRow(
+                    d.id, d.ownerType, d.ownerId, d.metadata, d.state, d.revision)
+                from BusinessDocumentEntity d where d.id = :id
+                """, BusinessDocumentRow.class).setParameter("id", documentId).getResultList().stream()
+                .findFirst().map(BusinessDocumentRow::snapshot));
     }
 
     @Override
     public List<BusinessDocument> findByOwner(DocumentOwnerRef owner) {
         Objects.requireNonNull(owner);
-        return read.execute(status -> entities.createQuery(
-                "select d from BusinessDocumentEntity d where d.ownerType = :type and d.ownerId = :id order by d.id",
-                BusinessDocumentEntity.class).setParameter("type", owner.type()).setParameter("id", owner.id())
-                .getResultList().stream().map(BusinessDocumentEntity::snapshot).toList());
+        return read.execute(status -> entities.createQuery("""
+                select new io.github.pitrecki.dokubridge.adapter.jpa.persistence.BusinessDocumentRow(
+                    d.id, d.ownerType, d.ownerId, d.metadata, d.state, d.revision)
+                from BusinessDocumentEntity d where d.ownerType = :type and d.ownerId = :id order by d.id
+                """, BusinessDocumentRow.class).setParameter("type", owner.type()).setParameter("id", owner.id())
+                .getResultList().stream().map(BusinessDocumentRow::snapshot).toList());
     }
 }
