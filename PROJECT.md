@@ -53,10 +53,13 @@ Correct state transitions and failure handling matter more than adding features.
 
 ## Read facade
 
-`DocumentBridge` is the implemented inbound port; `DefaultDocumentBridge` depends
+`core.port.in.DocumentBridge` is the inbound port. Its implementation,
+`core.application.DefaultDocumentBridge`, depends
 only on `BusinessDocumentRepository`, `DocumentVersionRepository` and
-`DocumentContentStore`, all defined in `core`. Persistence adapters will implement
-the repository ports outside the core. The existing `filesystem` module implements
+`DocumentContentStore`, all defined in `core`. The `jpa` module implements
+the repository ports outside the core. Types live in `core.domain` and
+`core.domain.exception`; infrastructure contracts live in `core.port.out`. The
+`filesystem` module implements
 the content port. No Spring, JPA or filesystem implementation is imported by core.
 
 `get(id)` returns an `Optional`; `findByOwner(owner)` returns an immutable list.
@@ -79,8 +82,7 @@ with string keys and lists. Supported number classes are `Byte`, `Short`, `Integ
 `Long`, `Float`, `Double`, `BigInteger` and `BigDecimal`; values and numeric types
 are preserved. Containers are copied recursively and made unmodifiable. Null map
 keys, cycles, non-finite numbers and other object types are rejected. Shared
-acyclic containers are valid. This does not yet define canonical serialization
-or a fingerprint for request idempotency.
+acyclic containers are valid. Request fingerprints compare these values using the JSON semantics below.
 
 ## Request idempotency
 
@@ -88,9 +90,96 @@ Upload commands will carry a globally unique request idempotency key, as selecte
 by the project owner. A matching replay returns the existing version without
 creating another version; different content or metadata with the same key is a
 conflict. Replaying a `PENDING` request reports that it is in progress. A `FAILED`
-request remains failed; a new attempt requires a new key. These are agreed facade
-requirements, not behavior implemented by the content store. Fingerprint encoding,
-key persistence and atomic duplicate resolution remain to be implemented.
+request remains failed; a new attempt requires a new key. The core facade and JPA
+adapter implement these rules; the content store itself does not implement request
+idempotency. Request keys are UUIDs and are retained without automatic expiry.
+
+`attach(AttachDocument)` and `addVersion(AddDocumentVersion)` return a
+`DocumentVersion`. Commands carry a required declared `ContentSha256` (64 hex
+digits, case-insensitive at input), request UUID and caller-owned content stream.
+Attach also carries the owner and an immutable metadata snapshot. Add-version
+carries the target document UUID and leaves metadata unchanged. Replays return the
+current version state without consuming or closing the supplied stream; they compare
+the declared checksum, not newly transmitted bytes. The caller closes the stream
+on success, failure, replay and conflict.
+
+Fingerprints include operation, declared content SHA-256 and either attachment
+owner/metadata or the add-version target. Map key order is ignored; list order is
+significant; numerically equal JSON numbers such as `1` and `1.0` compare equal.
+Null, missing fields and different scalar types remain distinct. The private v1
+encoding is length-delimited, type-tagged and SHA-256 hashed; its compatibility
+vector is tested because persisted request keys depend on it.
+
+Only an acquired reservation writes content. The facade streams through a digest,
+verifies the actual checksum, then finalizes `AVAILABLE`. Content I/O or checksum
+failure finalizes `FAILED` and rethrows the original error. If failure finalization
+also fails, that error is suppressed on the original cause. If successful storage
+is followed by a failed database finalization, the facade reports that failure,
+does not guess a failed outcome, and never writes again automatically. Durable
+state remains authoritative; an uncommitted finalization leaves `PENDING`.
+Checksum mismatch can leave a stored blob, but it remains undownloadable through
+the facade. Reconciliation and orphan cleanup require explicit operator action;
+no recovery scheduler or reconciliation API is provided yet.
+
+The original three-port `DefaultDocumentBridge` constructor remains read-only.
+Use its four-port constructor with `DocumentUploadRepository` to enable uploads.
+Default interface write methods reject unsupported uploads for existing external
+read-only implementations.
+
+## PostgreSQL persistence
+
+The `jpa` module contains `JpaBusinessDocumentRepository`,
+`JpaDocumentVersionRepository`, `JpaDocumentAuditRepository` and
+`JpaDocumentUploadRepository`. Its runtime dependencies provide Spring ORM
+transaction boundaries, Hibernate JPA, Jackson JSON encoding, PostgreSQL JDBC
+and Flyway migrations. The core has no new runtime dependencies. Adapters live in `adapter.jpa`, with
+entities and JSON mapping in `adapter.jpa.persistence`; the filesystem adapter
+lives in `adapter.filesystem`. ArchUnit enforces the dependency direction.
+
+The Flyway migration is opt-in at `classpath:db/dokubridge`; use the separate
+history table `dokubridge_flyway_history`. It is outside Flyway's default
+`db/migration` location to avoid running library migrations implicitly or colliding
+with host V1 migrations. Host applications supply the data source, entity manager
+factory (scanning `io.github.pitrecki.dokubridge.adapter.jpa`) and a shared `EntityManager`.
+Run migrations before Hibernate schema validation. See the PostgreSQL integration
+test for a working bootstrap without Spring Boot auto-configuration.
+
+Metadata is stored as JSONB. The adapter decodes integers as `BigInteger` and
+fractional numbers as `BigDecimal`, preserving precision without configuring the
+host's global JSON mapper. Java numeric wrapper classes and JSON object key order
+are not preserved across database round trips. Domain snapshots remain deeply
+immutable.
+
+`DocumentUploadRepository` is a semantic transaction port. Each reservation claims
+a globally unique UUID request key and its caller-supplied SHA-256 fingerprint,
+allocates a `PENDING` version and appends its reservation audit in one transaction.
+Attachment creates the document and version 1. Further reservations lock the
+document row and increment its version counter; a unique database constraint also
+protects `(document_id, version_number)`. Failed uploads consume their reserved
+version number. An uncommitted reservation rolls back all these records.
+
+A matching existing fingerprint returns `acquired=false` and the current version,
+including `PENDING` or `FAILED`; a different fingerprint raises
+`UploadRequestConflictException`. Replays add neither versions nor audit entries.
+The adapter accepts opaque fingerprints from the application service; it does not
+compute request identity or consume content. Hosts must not substitute an arbitrary
+hash and treat this port as full facade-level idempotency.
+
+Finalization locks the version and permits only `PENDING` to `AVAILABLE`/`FAILED`
+for the owning request. It appends `UPLOAD_SUCCEEDED`/`UPLOAD_FAILED` in that same
+transaction. An audit failure rolls back finalization, leaving the version pending.
+A connection failure with an ambiguous commit outcome requires inspecting durable
+state; the library does not retry an uncertain outcome automatically.
+
+Write transactions use PostgreSQL `READ COMMITTED` and `REQUIRES_NEW`. Calls inside
+an existing host transaction are rejected, so later content I/O cannot inherit an
+outer transaction. The port never performs content I/O. The facade performs content I/O only after
+reservation commits and before finalization begins.
+
+Both `ACTIVE` and `ARCHIVED` documents accept new versions. `DELETED` documents
+reject new requests as missing. A matching replay of an existing request returns
+its already reserved version without allocating another one, even after a document
+state change; download visibility is still enforced separately by the read facade.
 
 ## Content storage contract
 
@@ -126,4 +215,4 @@ Reconciliation and safe cleanup of interrupted uploads are not implemented yet.
 
 ## Open decisions
 
-The precise concurrency strategy for assigning version numbers, idempotency fingerprint and persistence details, cleanup/reconciliation after partially completed uploads and physical deletion/retention policy must be resolved against the actual implementation before treating them as guarantees. No framework or new module should be introduced solely to pre-empt these decisions.
+Cleanup/reconciliation after partially completed uploads and physical deletion/retention policy remain open. Metadata updates, archive/delete operations and their transaction/audit contracts remain to be implemented. No framework or new module should be introduced solely to pre-empt these decisions.

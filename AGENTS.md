@@ -15,6 +15,9 @@ DokuBridge is an embeddable Java library for attaching versioned documents, meta
 ## Architecture
 
 - Keep `core` independent of Spring, JPA, HTTP and filesystem details.
+- Use `core.domain` for the model, `core.domain.exception` for domain errors, `core.port.in` for the facade and commands, `core.port.out` for infrastructure contracts, and `core.application` for use-case implementations. Do not flatten these packages.
+- Keep implementations in `adapter.filesystem` and `adapter.jpa`, with JPA entities and JSON persistence mapping in `adapter.jpa.persistence`. Adapters depend on domain types and outbound ports, not on the application service or inbound ports.
+- Run the ArchUnit checks with the normal test suite; keep dependency direction enforced when adding types.
 - `DocumentBridge` is the public facade; `DefaultDocumentBridge` implements application-level behavior in `core`.
 - Persistence is provided through semantic ports and JPA adapters, including `JpaBusinessDocumentRepository`, `JpaDocumentVersionRepository` and `JpaDocumentAuditRepository`.
 - File storage is accessed through `DocumentContentStore`. Do not create a `JpaDocumentBridge` or `TransactionRunner`.
