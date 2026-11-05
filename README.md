@@ -88,7 +88,7 @@ flowchart LR
 ```
 
 The facade exposes `attach`, `addVersion`, `updateMetadata`, `archive`, `delete`,
-`get`, `findByOwner` and `getContent`.
+`get`, `findByOwner`, `getContent` and `reconcileUpload`.
 Active and archived documents are readable; deleted documents appear absent. Content is available
 only for an `AVAILABLE` version belonging to the requested document, regardless
 of whether bytes already exist in storage. The host application authorizes callers
@@ -122,6 +122,27 @@ Automatic recovery and physical retention/purge remain unimplemented. See
 [PROJECT.md](PROJECT.md#request-idempotency) for replay and checksum contracts and
 [PostgreSQL persistence](PROJECT.md#postgresql-persistence) for transaction setup.
 
+
+## Interrupted uploads
+
+```java
+var result = bridge.reconcileUpload(new ReconcileUpload(requestId, versionId));
+```
+
+For `PENDING`, reconciliation verifies the existing immutable blob against the
+checksum recorded at reservation: matching content becomes `AVAILABLE`, mismatched
+content becomes `FAILED`, and missing content stays `PENDING`. Storage errors
+propagate without finalization. Terminal versions return unchanged. Recovery and
+its audit commit together; concurrent matching finalizations add one audit.
+Reconciliation performs no content writes or deletion and does not expose deleted
+documents. The host authorizes calls and must invoke them outside its transactions.
+
+Apply migration V3 before using the current JPA adapter. Older requests lack the
+original checksum: legacy pending requests raise `UploadChecksumUnavailableException`
+without changing state, while legacy terminal results remain readable. A replay
+never backfills the checksum from caller input. There is no recovery scheduler or
+cleanup process. See [PROJECT.md](PROJECT.md#explicit-upload-reconciliation) for
+adapter guarantees and legacy limitations.
 
 ## Metadata and lifecycle
 

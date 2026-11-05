@@ -14,6 +14,15 @@ import java.util.UUID;
 
 /** Application-facing document facade. The host application owns authorization. */
 public interface DocumentBridge {
+    /**
+     * Reconciles PENDING content using its recorded checksum. Missing content stays pending.
+     * Terminal versions are returned unchanged; storage errors leave the version unmodified.
+     * The host must authorize this operation just like other document writes.
+     */
+    default DocumentVersion reconcileUpload(ReconcileUpload command) throws IOException {
+        throw new UnsupportedOperationException("Upload reconciliation is not configured");
+    }
+
     /** Replaces metadata with revision conflict detection; each accepted update advances the revision. */
     default BusinessDocument updateMetadata(UpdateMetadata command) {
         throw new UnsupportedOperationException("Document lifecycle operations are not configured");

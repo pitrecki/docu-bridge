@@ -5,6 +5,8 @@ public enum DocumentAuditAction {
     VERSION_ADDED(true),
     UPLOAD_SUCCEEDED(true),
     UPLOAD_FAILED(true),
+    UPLOAD_RECOVERED(true),
+    UPLOAD_RECOVERY_FAILED(true),
     METADATA_UPDATED(false),
     DOCUMENT_ARCHIVED(false),
     DOCUMENT_DELETED(false);

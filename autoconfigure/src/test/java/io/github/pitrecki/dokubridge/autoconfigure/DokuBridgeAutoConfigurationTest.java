@@ -111,7 +111,7 @@ class DokuBridgeAutoConfigurationTest {
             assertThat(context.getBean(DocumentAuditRepository.class).findByDocument(version.documentId())).hasSize(5);
             assertThat(count("host_record")).isEqualTo(1);
             assertThat(count("flyway_schema_history")).isEqualTo(1);
-            assertThat(count("dokubridge_flyway_history")).isEqualTo(3);
+            assertThat(count("dokubridge_flyway_history")).isEqualTo(4);
         });
     }
 
@@ -213,7 +213,7 @@ class DokuBridgeAutoConfigurationTest {
         runner().run(context -> {
             assertThat(context).hasNotFailed();
             assertThat(count("host_record")).isEqualTo(1);
-            assertThat(count("dokubridge_flyway_history")).isEqualTo(3);
+            assertThat(count("dokubridge_flyway_history")).isEqualTo(4);
         });
     }
 

@@ -14,7 +14,7 @@ DokuBridge is a small embeddable library for attaching documents to business ent
 
 ## Public boundary
 
-`DocumentBridge` is the application-facing entry point. Its operation set covers `AttachDocument`, `AddDocumentVersion`, `UpdateMetadata`, `Archive`, `Delete`, `Get`, `GetContent` and `FindByOwner`. Commands and value objects carry input validation. Public contracts must not expose JPA or filesystem implementations.
+`DocumentBridge` is the application-facing entry point. Its operation set covers `AttachDocument`, `AddDocumentVersion`, `UpdateMetadata`, `Archive`, `Delete`, `Get`, `GetContent`, `FindByOwner` and explicit `ReconcileUpload`. Commands and value objects carry input validation. Public contracts must not expose JPA or filesystem implementations.
 
 The main model consists of `BusinessDocument`, `DocumentVersion`, `DocumentOwnerRef(type, id)` and a metadata map (`Map<String, Object>`). Audit records describe meaningful actions and upload failures.
 
@@ -119,8 +119,8 @@ is followed by a failed database finalization, the facade reports that failure,
 does not guess a failed outcome, and never writes again automatically. Durable
 state remains authoritative; an uncommitted finalization leaves `PENDING`.
 Checksum mismatch can leave a stored blob, but it remains undownloadable through
-the facade. Reconciliation and orphan cleanup require explicit operator action;
-no recovery scheduler or reconciliation API is provided yet.
+the facade. Use explicit reconciliation below for interrupted requests. There is no scheduler
+or automatic orphan cleanup.
 
 The original three-port `DefaultDocumentBridge` constructor remains read-only.
 Use its four-port constructor with `DocumentUploadRepository` to enable uploads.
@@ -154,7 +154,8 @@ immutable.
 
 `DocumentUploadRepository` is a semantic transaction port. Each reservation claims
 a globally unique UUID request key and its caller-supplied SHA-256 fingerprint,
-allocates a `PENDING` version and appends its reservation audit in one transaction.
+records the declared content checksum, allocates a `PENDING` version and appends
+its reservation audit in one transaction.
 Attachment creates the document and version 1. Further reservations lock the
 document row and increment its version counter; a unique database constraint also
 protects `(document_id, version_number)`. Failed uploads consume their reserved
@@ -169,7 +170,10 @@ hash and treat this port as full facade-level idempotency.
 
 Finalization locks the version and permits only `PENDING` to `AVAILABLE`/`FAILED`
 for the owning request. It appends `UPLOAD_SUCCEEDED`/`UPLOAD_FAILED` in that same
-transaction. An audit failure rolls back finalization, leaving the version pending.
+transaction. Repeating the same terminal outcome returns the current snapshot
+without another audit; a contradictory terminal outcome is rejected. This permits
+an uploader and reconciliation to finish the same version safely. An audit failure
+rolls back finalization, leaving the version pending.
 A connection failure with an ambiguous commit outcome requires inspecting durable
 state; the library does not retry an uncertain outcome automatically.
 
@@ -232,9 +236,9 @@ back together if any persistence step fails.
 Migration V2 adds revision 0 to existing documents and relaxes audit identifiers
 only for document actions using a database check constraint. V1 is unchanged.
 The upgrade test migrates populated V1 data and verifies retained metadata,
-version ids, request fingerprints and upload audit references. Apply V2 before
-running this version with JPA schema validation; Boot's optional library initializer
-performs that upgrade when enabled.
+version ids, request fingerprints and upload audit references. Boot's optional
+library initializer performs the upgrades when enabled. Apply all migrations,
+including V3 below, before running the current adapter with JPA schema validation.
 
 ## Spring Boot integration
 
@@ -290,8 +294,55 @@ these are not downloadable by UUID. Failure after publication (including staging
 cleanup failure) can leave a complete blob despite the call reporting failure.
 The upload implementation must keep that version unavailable until database finalization
 or explicit reconciliation succeeds; blob existence alone is insufficient.
-Reconciliation and safe cleanup of interrupted uploads are not implemented yet.
+Explicit reconciliation verifies published content as described below. Cleanup of
+staging files and retained blobs remains an operator responsibility.
+
+## Explicit upload reconciliation
+
+`reconcileUpload(ReconcileUpload(requestId, versionId))` checks the request/version
+association, then returns an already terminal version without reading content.
+For `PENDING`, it streams the published blob through SHA-256 and compares it with
+the original declared checksum recorded in the reservation. Matching bytes become
+`AVAILABLE`; different bytes become `FAILED`. The stream is closed before the
+finalization transaction begins. A missing blob leaves the request pending and
+returns a fresh durable snapshot, since an uploader may still be publishing it.
+Other open/read/close errors propagate without requesting a state change.
+
+`DocumentUploadRepository.inspectForRecovery` returns a fresh committed snapshot
+and its optional recorded checksum. `completeRecovery` locks/refreshes the version
+and atomically finalizes it with `UPLOAD_RECOVERED` or `UPLOAD_RECOVERY_FAILED`.
+Both audit actions require request/version ids. Audit failure rolls back the
+transition. Matching finalization races add one terminal audit; a contradictory
+outcome fails rather than overwriting a committed result. Database transactions
+are closed during all content I/O, and enclosing host transactions are rejected.
+Replays also refresh their version when a host retains its persistence context.
+
+Recovery relies on the content store publishing only complete immutable blobs.
+It can inspect an active upload safely: before publication it leaves `PENDING`;
+after publication it may finalize before the original uploader. It never retries
+`store`, resets `FAILED`, allocates versions, updates document revision, deletes
+content, or makes a logically deleted document visible. The host authorizes this
+operation. There is no scheduler, timeout, batch discovery or cleanup process.
+
+Migration V3 adds nullable `expected_sha256` and the recovery audit actions; V1/V2
+remain unchanged. New facade reservations record the checksum atomically with the
+request. Existing fingerprints remain byte-for-byte compatible. Legacy requests
+have no recorded checksum because a fingerprint cannot be reversed. Legacy
+`PENDING` reconciliation raises `UploadChecksumUnavailableException` without
+reading or changing content; the adapter never trusts a hash derived solely from
+the stored blob. Legacy terminal versions still return normally. Replays do not
+backfill this field. Resolving legacy pending uploads requires operator evidence
+of their original intent outside this API.
+
+Existing custom upload repositories remain source compatible through default
+checksum overloads and unsupported recovery methods. To support recovery they
+must persist the original checksum and implement inspection/finalization with the
+same transaction and concurrency guarantees. The original reservation overloads
+remain usable but create requests without recovery checksums in the JPA adapter.
 
 ## Open decisions
 
-Cleanup/reconciliation after partially completed uploads and physical deletion/retention policy remain open. Metadata updates, archive and logical deletion are implemented. Automatic recovery and physical retention/purge remain outside the current implementation. No framework or new module should be introduced solely to pre-empt these decisions.
+Physical deletion, retention policy, staging-file cleanup and automatic recovery
+remain open. Metadata updates, archive, logical deletion and explicit upload
+reconciliation are implemented. No framework or new module should be introduced
+solely to pre-empt the remaining decisions.

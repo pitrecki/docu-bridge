@@ -7,14 +7,18 @@ import io.github.pitrecki.dokubridge.core.domain.DocumentOwnerRef;
 import io.github.pitrecki.dokubridge.core.domain.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.domain.DocumentVersionState;
 import io.github.pitrecki.dokubridge.core.domain.exception.ContentChecksumMismatchException;
+import io.github.pitrecki.dokubridge.core.domain.exception.DocumentContentNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.exception.DocumentContentUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.exception.DocumentNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.exception.DocumentVersionNotFoundException;
+import io.github.pitrecki.dokubridge.core.domain.exception.UploadChecksumUnavailableException;
+import io.github.pitrecki.dokubridge.core.domain.exception.UploadRequestNotFoundException;
 import io.github.pitrecki.dokubridge.core.port.in.AddDocumentVersion;
 import io.github.pitrecki.dokubridge.core.port.in.Archive;
 import io.github.pitrecki.dokubridge.core.port.in.AttachDocument;
 import io.github.pitrecki.dokubridge.core.port.in.Delete;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
+import io.github.pitrecki.dokubridge.core.port.in.ReconcileUpload;
 import io.github.pitrecki.dokubridge.core.port.in.UpdateMetadata;
 import io.github.pitrecki.dokubridge.core.port.out.BusinessDocumentRepository;
 import io.github.pitrecki.dokubridge.core.port.out.DocumentContentStore;
@@ -24,6 +28,7 @@ import io.github.pitrecki.dokubridge.core.port.out.DocumentVersionRepository;
 import io.github.pitrecki.dokubridge.core.port.out.UploadReservation;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.security.DigestInputStream;
 import java.util.HexFormat;
 import java.util.List;
@@ -67,6 +72,33 @@ public final class DefaultDocumentBridge implements DocumentBridge {
     }
 
     @Override
+    public DocumentVersion reconcileUpload(ReconcileUpload command) throws IOException {
+        Objects.requireNonNull(command, "Reconciliation command must not be null");
+        var repository = uploadRepository();
+        var candidate = repository.inspectForRecovery(command.requestId(), command.versionId());
+        var version = candidate.version();
+        if (!version.id().equals(command.versionId())) {
+            throw new UploadRequestNotFoundException(command.requestId(), command.versionId());
+        }
+        if (version.state() != DocumentVersionState.PENDING) return version;
+        var expected = candidate.expectedChecksum()
+                .orElseThrow(() -> new UploadChecksumUnavailableException(command.requestId()));
+        InputStream stored;
+        try {
+            stored = content.open(version.id());
+        } catch (DocumentContentNotFoundException missing) {
+            return repository.inspectForRecovery(command.requestId(), command.versionId()).version();
+        }
+        var digest = UploadFingerprint.sha256();
+        try (var input = stored) {
+            new DigestInputStream(input, digest).transferTo(OutputStream.nullOutputStream());
+        }
+        var outcome = expected.value().equals(HexFormat.of().formatHex(digest.digest()))
+                ? DocumentVersionState.AVAILABLE : DocumentVersionState.FAILED;
+        return repository.completeRecovery(command.requestId(), version.id(), outcome);
+    }
+
+    @Override
     public BusinessDocument updateMetadata(UpdateMetadata command) {
         Objects.requireNonNull(command, "Metadata command must not be null");
         return lifecycleRepository().updateMetadata(command.documentId(), command.expectedRevision(), command.metadata());
@@ -94,7 +126,7 @@ public final class DefaultDocumentBridge implements DocumentBridge {
         Objects.requireNonNull(command, "Attach command must not be null");
         var repository = uploadRepository();
         var reservation = repository.reserveAttach(command.requestId(), UploadFingerprint.attach(command),
-                command.owner(), command.metadata());
+                command.owner(), command.metadata(), command.checksum());
         return upload(command.requestId(), reservation, command.checksum(), command.content());
     }
 
@@ -102,7 +134,7 @@ public final class DefaultDocumentBridge implements DocumentBridge {
     public DocumentVersion addVersion(AddDocumentVersion command) throws IOException {
         Objects.requireNonNull(command, "Version command must not be null");
         var repository = uploadRepository();
-        var reservation = repository.reserveVersion(command.requestId(), UploadFingerprint.version(command), command.documentId());
+        var reservation = repository.reserveVersion(command.requestId(), UploadFingerprint.version(command), command.documentId(), command.checksum());
         return upload(command.requestId(), reservation, command.checksum(), command.content());
     }
 

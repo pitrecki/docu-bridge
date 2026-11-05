@@ -10,6 +10,8 @@ public interface DocumentContentStore {
      * Stores immutable content under a version id, rejecting an existing key.
      * Does not close the caller's source. A failed call may leave stored content
      * after publication; callers must not infer availability from blob existence.
+     * Content under a published version key must be complete and immutable, including
+     * while store is still finishing. Reconciliation relies on that publication contract.
      */
     void store(UUID versionId, InputStream source) throws IOException;
 

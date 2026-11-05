@@ -349,6 +349,30 @@ class JpaDocumentLifecycleRepositoryTest {
     }
 
     @Test
+    void retainedHostContextMustNotReturnAnObsoleteUploadReplay() throws Exception {
+        UUID request = UUID.randomUUID();
+        String fingerprint = "a".repeat(64);
+        var pending = uploads.reserveAttach(request, fingerprint, owner, Map.of()).version();
+        var retained = factory.getObject().createEntityManager();
+        try {
+            retained.find(io.github.pitrecki.dokubridge.adapter.jpa.persistence.DocumentVersionEntity.class, pending.id());
+            TransactionSynchronizationManager.bindResource(factory.getObject(), new org.springframework.orm.jpa.EntityManagerHolder(retained));
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                executor.submit(() -> uploads.complete(request, pending.id(), DocumentVersionState.AVAILABLE)).get(20, TimeUnit.SECONDS);
+            }
+            var replay = uploads.reserveAttach(request, fingerprint, owner, Map.of());
+            assertThat(replay.acquired()).isFalse();
+            assertThat(replay.version().state()).isEqualTo(DocumentVersionState.AVAILABLE);
+        } finally {
+            if (TransactionSynchronizationManager.hasResource(factory.getObject())) {
+                TransactionSynchronizationManager.unbindResource(factory.getObject());
+            }
+            retained.close();
+        }
+        assertThat(audits.findByDocument(pending.documentId())).hasSize(2);
+    }
+
+    @Test
     void reservedUploadCanFinishAfterDeletionWithoutBecomingDownloadable() throws Exception {
         UUID id = newDocument().documentId();
         var entered = new CountDownLatch(1);
@@ -402,7 +426,7 @@ class JpaDocumentLifecycleRepositoryTest {
     @Test
     void databaseRejectsInvalidAuditContextsEvenOutsideJpa() throws Exception {
         var version = newDocument();
-        for (String action : List.of("DOCUMENT_ARCHIVED", "UPLOAD_SUCCEEDED", "UNKNOWN")) {
+        for (String action : List.of("DOCUMENT_ARCHIVED", "UPLOAD_SUCCEEDED", "UPLOAD_RECOVERED", "UPLOAD_RECOVERY_FAILED", "UNKNOWN")) {
             assertThatThrownBy(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
                 var statement = entities.createNativeQuery("""
                         insert into dokubridge_audit(id, document_id, version_id, request_id, action, occurred_at)

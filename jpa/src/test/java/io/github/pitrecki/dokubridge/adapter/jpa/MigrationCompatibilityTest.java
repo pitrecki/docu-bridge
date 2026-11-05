@@ -63,7 +63,7 @@ class MigrationCompatibilityTest {
         }
         var latest = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/dokubridge").table("dokubridge_flyway_history").load();
-        assertThat(latest.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(latest.migrate().migrationsExecuted).isEqualTo(2);
         latest.validate();
         assertThat(latest.migrate().migrationsExecuted).isZero();
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
@@ -74,7 +74,7 @@ class MigrationCompatibilityTest {
             }
             try (var row = statement.executeQuery("""
                     select d.id, d.metadata ->> 'amount', d.metadata ? 'nullable', d.state, d.last_version,
-                           v.id, v.state, r.id, r.fingerprint, a.id, a.action
+                           v.id, v.state, r.id, r.fingerprint, a.id, a.action, r.expected_sha256
                     from dokubridge_documents d join dokubridge_versions v on v.document_id = d.id
                     join dokubridge_upload_requests r on r.version_id = v.id
                     join dokubridge_audit a on a.request_id = r.id
@@ -91,6 +91,7 @@ class MigrationCompatibilityTest {
                 assertThat(row.getString(9)).isEqualTo(fingerprint);
                 assertThat(row.getObject(10, UUID.class)).isEqualTo(audit);
                 assertThat(row.getString(11)).isEqualTo("UPLOAD_SUCCEEDED");
+                assertThat(row.getString(12)).isNull();
                 assertThat(row.next()).isFalse();
             }
         }

@@ -52,7 +52,7 @@ class PackagedSampleIT {
         assertThat(count("dokubridge_versions")).isEqualTo(4);
         assertThat(count("dokubridge_upload_requests")).isEqualTo(4);
         assertThat(count("dokubridge_audit")).isEqualTo(14);
-        assertThat(count("dokubridge_flyway_history")).isEqualTo(2);
+        assertThat(count("dokubridge_flyway_history")).isEqualTo(3);
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.createStatement()) {
             try (var result = statement.executeQuery("select count(*) from dokubridge_documents where state = 'DELETED' and revision = 3")) {
