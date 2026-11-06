@@ -18,6 +18,36 @@ DokuBridge is a small embeddable library for attaching documents to business ent
 
 The main model consists of `BusinessDocument`, `DocumentVersion`, `DocumentOwnerRef(type, id)` and a metadata map (`Map<String, Object>`). Audit records describe meaningful actions and upload failures.
 
+## Fluent API
+
+The primary usage style is `bridge.upload(bytes).toOwner(type, id).save()` and
+`bridge.document(id)`. Attachment drafts require an owner before save is exposed;
+metadata replacement requires `replaceMetadata(map).atRevision(revision).save()`.
+These requirements are enforced by the returned step types, including compilation
+checks against the core alone. Fluent types live in `core.port.in.upload` and
+`core.port.in.document` and delegate to the existing command/query facade.
+
+Byte-array upload drafts capture a private snapshot and calculate SHA-256
+automatically. Metadata configuration takes a deep immutable JSON snapshot;
+configuration returns new drafts rather than mutating earlier branches. The
+attachment draft's `metadata(map)` replaces the whole map, while its key/value
+overload adds or replaces an entry. Document metadata replacement retains its
+existing full-replacement and revision rules.
+
+Every unkeyed save allocates a new UUID request key at execution. An explicit
+`requestId(key)` enables the existing idempotency contract, including replays of
+pending/failed results. Streams retain their declared checksum and caller-owned
+lifecycle: draft creation does not read them, and save does not close them.
+Streams are not buffered or rewound. Byte snapshots can be saved repeatedly with
+fresh internal streams; input streams remain stateful and require fresh input
+for new uploads.
+
+Configuring a draft or binding a document id performs no repository/storage I/O.
+`save()` executes upload or metadata changes; document terminal reads and
+archive/delete calls execute their named operations. Document contexts cache no
+state. Fluent entry points add no new transaction, persistence, authorization or
+recovery policy. Existing commands and facade implementations remain supported.
+
 ## Lifecycle and consistency
 
 | Entity | States |

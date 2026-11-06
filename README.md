@@ -3,6 +3,21 @@
 Embeddable document versioning for Java applications. See [PROJECT.md](PROJECT.md)
 for scope and [AGENTS.md](AGENTS.md) for engineering rules.
 
+```java
+var version = bridge.upload(bytes)
+    .toOwner("Invoice", "42")
+    .metadata("category", "invoice")
+    .save();
+
+var document = bridge.document(version.documentId());
+document.upload(revisedBytes).save();
+var history = document.versions();
+var audit = document.audit();
+```
+
+The fluent API supplies SHA-256 for byte arrays and a fresh request key for each
+save. Use an explicit request key when an upload must support idempotent retries.
+
 ## Build
 
 Requires JDK 21 and network access to Maven Central on the first build.
@@ -184,6 +199,62 @@ Automatic recovery and physical retention/purge remain unimplemented. See
 [PostgreSQL persistence](PROJECT.md#postgresql-persistence) for transaction setup.
 
 
+## Fluent operations
+
+Uploads start with content, followed by a required owner. Only a completed draft
+exposes `save()`. Metadata replacement similarly requires `atRevision(...)` before
+`save()` becomes available. Creating/configuring drafts performs no repository
+or stream I/O; upload and metadata writes happen at `save()`.
+
+For an upload that can be retried, select the request key before the first save:
+
+```java
+var upload = bridge.upload(bytes)
+    .toOwner("Invoice", "42")
+    .metadata("category", "invoice")
+    .requestId(requestId);
+
+var first = upload.save();
+var replay = upload.save();
+```
+
+Every unkeyed `save()` creates a new request, including repeated saves of one
+draft. A keyed save follows the existing replay/conflict rules. Draft configuration
+is immutable: byte arrays and JSON metadata are copied when supplied, so branching
+a draft or modifying the original input does not change another draft.
+`metadata(map)` replaces the attachment draft's complete map;
+`metadata(key, value)` adds/replaces one entry, including JSON null. Maps such as
+`Map<String, String>` are accepted without casts.
+
+Streams require the original declared checksum and stay caller-owned:
+
+```java
+try (var input = Files.newInputStream(path)) {
+    var version = bridge.upload(input, expectedSha256)
+        .toOwner("Invoice", "42")
+        .requestId(requestId)
+        .save();
+}
+```
+
+Stream drafts neither buffer, rewind nor close input, including on failure and
+replay. Supply a fresh stream for a new upload. Large content can use this path
+without the byte-array snapshot. Checksums accept `ContentSha256` or its hex string;
+`ContentSha256.of(bytes)` is available for callers that need the value explicitly.
+
+`bridge.document(id)` binds the id without loading or caching its state. Its
+terminal reads are `get()`, `versions()`, `audit()` and `content(versionId)`;
+callers close returned content streams. `upload(...)` starts a version draft,
+while `archive()` and `delete()` execute those operations directly. Metadata uses
+`replaceMetadata(map).atRevision(revision).save()` as shown below. Owner lookup
+also accepts `bridge.findByOwner("Invoice", "42")`; explicit recovery accepts
+`bridge.reconcileUpload(requestId, versionId)`.
+
+Fluent operations call the existing command/query facade. Visibility, authorization
+by the host, version numbering, revision conflicts, audit and transaction behavior
+remain the same. Existing command-based calls and custom facade implementations
+remain supported; no additional Spring bean or storage adapter is needed.
+
 ## Version history
 
 ```java
@@ -191,7 +262,7 @@ import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
 import java.util.List;
 
-List<DocumentVersion> history = bridge.getVersions(documentId);
+List<DocumentVersion> history = bridge.document(documentId).versions();
 ```
 
 History includes `PENDING`, `AVAILABLE` and `FAILED` versions, ordered by version
@@ -213,7 +284,7 @@ history without new configuration or a database migration.
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import java.util.List;
 
-List<DocumentAuditEntry> audit = bridge.getAudit(documentId);
+List<DocumentAuditEntry> audit = bridge.document(documentId).audit();
 ```
 
 The facade returns an immutable list of document and upload events in database
@@ -247,7 +318,7 @@ host-provided replacement. No new property, dependency or migration is required.
 ## Interrupted uploads
 
 ```java
-var result = bridge.reconcileUpload(new ReconcileUpload(requestId, versionId));
+var result = bridge.reconcileUpload(requestId, versionId);
 ```
 
 For `PENDING`, reconciliation verifies the existing immutable blob against the
@@ -268,11 +339,13 @@ adapter guarantees and legacy limitations.
 ## Metadata and lifecycle
 
 ```java
-var document = bridge.get(documentId).orElseThrow();
-var updated = bridge.updateMetadata(new UpdateMetadata(
-    document.id(), document.revision(), Map.of("category", "revised")));
-bridge.archive(new Archive(document.id()));
-bridge.delete(new Delete(document.id()));
+var document = bridge.document(documentId);
+var current = document.get().orElseThrow();
+var updated = document.replaceMetadata(Map.of("category", "revised"))
+    .atRevision(current.revision())
+    .save();
+document.archive();
+document.delete();
 ```
 
 Metadata is replaced completely, including on archived documents. The returned
@@ -338,8 +411,8 @@ After `./mvnw verify`:
 java -jar sample-app/target/dokubridge-sample-app-0.1.0-SNAPSHOT.jar
 ```
 
-The console application enables library schema initialization, validates the JPA
-schema, attaches a document, replays the request, adds version 2 and verifies its
+The console application uses the fluent API, enables library schema initialization,
+validates the JPA schema, attaches a document, replays the request, adds version 2 and verifies its
 download, ordered version history and audit through `DocumentBridge`. It then
 replaces metadata, archives and logically deletes that example document, verifies read invisibility, prints its id
 and exits. Each run creates another retained, logically deleted example document. It enables no HTTP endpoints and disables the

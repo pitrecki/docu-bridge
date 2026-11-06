@@ -1,6 +1,7 @@
 package io.github.pitrecki.dokubridge.core.port.in;
 
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
+import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentContentUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
@@ -9,9 +10,11 @@ import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.domain.version.exception.DocumentVersionNotFoundException;
 import io.github.pitrecki.dokubridge.core.port.in.document.Archive;
 import io.github.pitrecki.dokubridge.core.port.in.document.Delete;
+import io.github.pitrecki.dokubridge.core.port.in.document.DocumentHandle;
 import io.github.pitrecki.dokubridge.core.port.in.document.UpdateMetadata;
 import io.github.pitrecki.dokubridge.core.port.in.upload.AddDocumentVersion;
 import io.github.pitrecki.dokubridge.core.port.in.upload.AttachDocument;
+import io.github.pitrecki.dokubridge.core.port.in.upload.DocumentUpload;
 import io.github.pitrecki.dokubridge.core.port.in.upload.ReconcileUpload;
 import java.io.IOException;
 import java.io.InputStream;
@@ -21,6 +24,33 @@ import java.util.UUID;
 
 /** Application-facing document facade. The host application owns authorization. */
 public interface DocumentBridge {
+    /** Starts an upload from an immutable byte snapshot, with SHA-256 computed automatically. */
+    default DocumentUpload.OwnerStep upload(byte[] content) {
+        return DocumentUpload.fromBytes(this, content);
+    }
+
+    /** Starts an upload without reading or closing the caller-owned stream. */
+    default DocumentUpload.OwnerStep upload(InputStream content, ContentSha256 checksum) {
+        return DocumentUpload.fromStream(this, content, checksum);
+    }
+
+    default DocumentUpload.OwnerStep upload(InputStream content, String sha256) {
+        return upload(content, new ContentSha256(sha256));
+    }
+
+    /** Creates a document context without loading its state. */
+    default DocumentHandle document(UUID documentId) {
+        return new DocumentHandle(this, documentId);
+    }
+
+    default List<BusinessDocument> findByOwner(String type, String id) {
+        return findByOwner(new DocumentOwnerRef(type, id));
+    }
+
+    default DocumentVersion reconcileUpload(UUID requestId, UUID versionId) throws IOException {
+        return reconcileUpload(new ReconcileUpload(requestId, versionId));
+    }
+
     /**
      * Reconciles PENDING content using its recorded checksum. Missing content stays pending.
      * Terminal versions are returned unchanged; storage errors leave the version unmodified.
