@@ -64,6 +64,22 @@ To run just the filesystem adapter and its core prerequisite:
 ./mvnw -pl filesystem -am verify
 ```
 
+CI also checks a standalone host in `integration-tests/starter-consumer` after
+installing the library. That project has its own Spring Boot BOM and no library
+parent or reactor membership, so it resolves the installed starter and its
+transitive dependencies. The test starts PostgreSQL through Testcontainers and
+exercises fluent upload/replay, downloads, owner lookup, metadata and lifecycle
+operations. Run the same checks locally from the repository root:
+
+```sh
+./mvnw install
+./mvnw --file integration-tests/starter-consumer/pom.xml verify
+```
+
+Use the same local Maven repository for both commands. This consumer check runs
+separately from the normal reactor `verify`; it needs the artifacts installed by
+the first command. Keep its starter version aligned with the library version.
+
 ## Library artifacts
 
 `package` and `verify` attach `-sources.jar` and `-javadoc.jar` alongside the

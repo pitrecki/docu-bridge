@@ -123,6 +123,14 @@ this packaging, and `install` makes the compiled/source/documentation artifacts
 available to independent Maven consumers. Starter remains a dependency bundle;
 sample packaging remains executable. These are build-time plugins only.
 
+`integration-tests/starter-consumer` is an independent Maven test project outside
+the library reactor. It consumes the installed starter through a host-owned Boot
+BOM without inheriting the library parent, so missing transitive dependencies or
+invalid installed POMs cannot be hidden by reactor resolution. CI runs `install`
+first, including the full library and packaged-sample suite, then verifies this
+consumer against PostgreSQL. Its fluent flow covers upload/replay, content and
+audit reads, owner results, metadata revision checks, archive and deletion.
+
 ## Engineering priorities
 
 Correct state transitions and failure handling matter more than adding features. Prefer a small public API, explicit invariants, short transactions, deterministic tests and understandable code. Verify persistence with PostgreSQL, cover edge cases around storage failure and concurrent version creation, and keep docs restricted to decisions that matter to maintainers and consumers.

@@ -15,4 +15,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - run: ./mvnw --batch-mode verify
+      - name: Build and install library
+        run: ./mvnw --batch-mode install
+      - name: Verify independent starter consumer
+        run: ./mvnw --batch-mode --file integration-tests/starter-consumer/pom.xml verify
