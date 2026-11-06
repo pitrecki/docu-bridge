@@ -36,7 +36,15 @@ public final class VersionUpload {
         return new VersionUpload(bridge, documentId, content, Objects.requireNonNull(key, "Request id must not be null"));
     }
 
-    /** Each call uses a new key unless requestId was supplied; caller-owned streams remain open. */
+    /**
+     * Adds one content version without changing document metadata or revision.
+     * Each call uses a new key unless {@link #requestId(UUID)} was supplied.
+     * Matching keyed replays may return pending or failed snapshots without consuming
+     * content. Caller-owned input streams remain open. The returned continuation
+     * selects this upload's version without changing earlier document contexts.
+     *
+     * @throws IOException if uploading or verifying content fails
+     */
     public DocumentResult<DocumentVersion> save() throws IOException {
         UUID key = requestId == null ? UUID.randomUUID() : requestId;
         try (var input = content.open()) {
@@ -44,7 +52,15 @@ public final class VersionUpload {
         }
     }
 
-    /** Executes save before the callback; callback failure does not roll back the completed upload. */
+    /**
+     * Saves once and invokes the callback on that version's document continuation.
+     * Runs on normally returning pending/failed replays too; save exceptions skip it.
+     * Callback exceptions propagate without undoing earlier commits. Replaying an
+     * upload repeats its callback. Returns the original version snapshot and context.
+     *
+     * @throws IOException if saving or the callback fails with an I/O error
+     * @throws NullPointerException if the callback is null, before saving
+     */
     public DocumentResult<DocumentVersion> saveAndThen(DocumentAction action) throws IOException {
         Objects.requireNonNull(action, "Document action must not be null");
         return save().andThen(action);

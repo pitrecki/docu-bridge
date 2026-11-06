@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Immutable attachment draft. Only save performs I/O; an explicit request id enables retries. */
+/** Immutable attachment draft. Save operations perform I/O; an explicit request id enables retries. */
 public final class DocumentUpload {
     /** An owner is required before metadata, request identity and save become available. */
     public interface OwnerStep {
@@ -62,7 +62,14 @@ public final class DocumentUpload {
         return new DocumentUpload(bridge, content, owner, metadata, Objects.requireNonNull(key, "Request id must not be null"));
     }
 
-    /** Each call uses a new key unless requestId was supplied; caller-owned streams remain open. */
+    /**
+     * Attaches one document and returns its version snapshot with a document continuation.
+     * Each call uses a new request key unless {@link #requestId(UUID)} was supplied.
+     * A matching keyed replay returns its current state, which may be pending or failed,
+     * without consuming content. Caller-owned input streams remain open on every path.
+     *
+     * @throws IOException if uploading or verifying content fails
+     */
     public DocumentResult<DocumentVersion> save() throws IOException {
         UUID key = requestId == null ? UUID.randomUUID() : requestId;
         try (var input = content.open()) {
@@ -70,7 +77,20 @@ public final class DocumentUpload {
         }
     }
 
-    /** Executes save before the callback; callback failure does not roll back the completed upload. */
+    /**
+     * Saves once, then passes its document to the callback without extracting an id:
+     * <pre>{@code
+     * bridge.upload(bytes).toOwner("Invoice", "42")
+     *     .saveAndThen(document -> document.archive());
+     * }</pre>
+     * The callback runs whenever save returns normally, including keyed pending/failed
+     * replays. A save exception skips it; a callback exception does not undo the upload
+     * or other committed operations. Replaying an upload repeats its callback.
+     * The returned result is the original upload snapshot.
+     *
+     * @throws IOException if saving or the callback fails with an I/O error
+     * @throws NullPointerException if the callback is null, before saving
+     */
     public DocumentResult<DocumentVersion> saveAndThen(DocumentAction action) throws IOException {
         Objects.requireNonNull(action, "Document action must not be null");
         return save().andThen(action);

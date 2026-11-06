@@ -39,7 +39,15 @@ public final class DocumentHandle {
         return documentId;
     }
 
-    /** Opens the version selected by an upload result; the caller closes the returned stream. */
+    /**
+     * Opens the version selected by an upload result; the caller closes the returned stream.
+     * Later uploads do not change this selection. Metadata and archive continuations
+     * preserve it. Every open checks current document visibility and version availability.
+     *
+     * @throws IllegalStateException if this context was created from a document id alone;
+     *         use {@link #content(UUID)} to select a version explicitly
+     * @throws IOException if opening content fails
+     */
     public InputStream content() throws IOException {
         if (contentVersionId == null) {
             throw new IllegalStateException("No version selected; use an upload continuation or content(versionId)");

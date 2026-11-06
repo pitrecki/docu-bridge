@@ -37,11 +37,23 @@ public final class MetadataReplacement {
         return revision -> new MetadataReplacement(bridge, new UpdateMetadata(documentId, revision, snapshot), document);
     }
 
+    /**
+     * Replaces the entire metadata map at the selected revision, including for archived documents.
+     * The result carries the new revision; the continuation retains any selected content version.
+     * A stale revision conflicts without changing metadata or appending an audit.
+     */
     public DocumentResult<BusinessDocument> save() {
         return DocumentResult.changed(document, bridge.updateMetadata(command));
     }
 
-    /** Runs the callback after replacement; earlier committed changes remain if it fails. */
+    /**
+     * Runs the callback after replacement and returns the replacement's original snapshot.
+     * A stale revision skips the callback. Callback failure leaves the replacement committed;
+     * repeating the draft with its old revision still conflicts.
+     *
+     * @throws IOException if the callback fails with an I/O error
+     * @throws NullPointerException if the callback is null, before replacement
+     */
     public DocumentResult<BusinessDocument> saveAndThen(DocumentAction action) throws IOException {
         Objects.requireNonNull(action, "Document action must not be null");
         return save().andThen(action);

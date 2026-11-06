@@ -8,6 +8,7 @@ import io.github.pitrecki.dokubridge.adapter.jpa.version.JpaDocumentVersionRepos
 import io.github.pitrecki.dokubridge.core.application.DefaultDocumentBridge;
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditAction;
 import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
+import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentContentUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocumentState;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
 import io.github.pitrecki.dokubridge.core.domain.document.exception.DocumentNotFoundException;
@@ -16,6 +17,7 @@ import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadRequestC
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
 import io.github.pitrecki.dokubridge.core.port.in.upload.AttachDocument;
+import io.github.pitrecki.dokubridge.core.port.out.content.DocumentContentStore;
 import jakarta.persistence.EntityManager;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -26,6 +28,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.flywaydb.core.Flyway;
@@ -87,9 +92,7 @@ class FluentDocumentBridgeTest {
         uploads = new JpaDocumentUploadRepository(entities, transactions);
         audits = new JpaDocumentAuditRepository(entities, transactions);
         files = new FilesystemDocumentContentStore(root);
-        bridge = new DefaultDocumentBridge(new JpaBusinessDocumentRepository(entities, transactions),
-                new JpaDocumentVersionRepository(entities, transactions), files, uploads,
-                new JpaDocumentLifecycleRepository(entities, transactions), audits);
+        bridge = usingStore(files);
     }
 
     @Test
@@ -360,6 +363,118 @@ class FluentDocumentBridgeTest {
     }
 
     @Test
+    void pendingReplayRunsItsCallbackWithoutPublishingOrDuplicatingTheActiveUpload() throws Exception {
+        var storing = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var writes = new AtomicInteger();
+        var callbacks = new AtomicInteger();
+        var slowBridge = usingStore(new DocumentContentStore() {
+            public void store(UUID id, InputStream source) throws IOException {
+                writes.incrementAndGet();
+                storing.countDown();
+                try {
+                    if (!release.await(20, TimeUnit.SECONDS)) throw new IOException("Upload was not released");
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Upload interrupted", interrupted);
+                }
+                files.store(id, source);
+            }
+            public InputStream open(UUID id) throws IOException { return files.open(id); }
+        });
+        var draft = slowBridge.upload(bytes).toOwner("Invoice", "42").requestId(UUID.randomUUID());
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var uploading = executor.submit(draft::save);
+            try {
+                assertThat(storing.await(20, TimeUnit.SECONDS)).isTrue();
+                var replay = draft.saveAndThen(document -> {
+                    callbacks.incrementAndGet();
+                    assertThat(document.versions()).singleElement()
+                            .extracting(DocumentVersion::state).isEqualTo(DocumentVersionState.PENDING);
+                    assertThatThrownBy(document::content).isInstanceOf(DocumentContentUnavailableException.class);
+                });
+                assertThat(replay.result().state()).isEqualTo(DocumentVersionState.PENDING);
+                assertThat(callbacks).hasValue(1);
+                assertThat(writes).hasValue(1);
+                assertThat(replay.and().audit()).hasSize(1);
+                assertThat(replay.and().versions()).containsExactly(replay.result());
+            } finally {
+                release.countDown();
+            }
+            var completed = uploading.get(20, TimeUnit.SECONDS);
+            assertThat(completed.result().state()).isEqualTo(DocumentVersionState.AVAILABLE);
+            assertThat(completed.and().versions()).containsExactly(completed.result());
+            assertThat(completed.and().audit()).hasSize(2);
+        }
+    }
+
+    @Test
+    void selectedContentStaysOnItsVersionAndRechecksVisibilityAfterDeletion() throws Exception {
+        var first = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var second = first.and().upload(new byte[]{7}).save();
+        try (var input = first.and().content()) {
+            assertThat(input.readAllBytes()).containsExactly(bytes);
+        }
+        try (var input = second.and().content()) {
+            assertThat(input.readAllBytes()).containsExactly((byte) 7);
+        }
+        second.and().delete();
+        assertThatThrownBy(first.and()::content).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(second.and()::content).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(first.and()::versions).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(second.and()::audit).isInstanceOf(DocumentNotFoundException.class);
+        assertThat(audits.findByDocument(first.and().id())).hasSize(5);
+    }
+
+    @Test
+    void metadataResultKeepsItsSnapshotWhenTheCallbackArchivesTheDocument() throws Exception {
+        var saved = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var updated = saved.and().replaceMetadata(Map.of("callback", true)).atRevision(0)
+                .saveAndThen(document -> document.archive());
+        assertThat(updated.result().state()).isEqualTo(BusinessDocumentState.ACTIVE);
+        assertThat(updated.result().revision()).isEqualTo(1);
+        assertThat(updated.and().get().orElseThrow().state()).isEqualTo(BusinessDocumentState.ARCHIVED);
+        assertThat(updated.and().get().orElseThrow().revision()).isEqualTo(2);
+        try (var input = updated.and().content()) {
+            assertThat(input.readAllBytes()).containsExactly(bytes);
+        }
+        assertThat(updated.and().audit()).hasSize(4);
+    }
+
+    @Test
+    void versionCallbackFailureRetainsTheVersionAndReplayDoesNotAllocateAnother() throws Exception {
+        var first = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var draft = first.and().upload(new byte[]{7}).requestId(UUID.randomUUID());
+        var failure = new IOException("After version upload");
+        assertThatThrownBy(() -> draft.saveAndThen(document -> {
+            document.archive();
+            throw failure;
+        })).isSameAs(failure);
+        var replay = draft.save();
+        assertThat(replay.result().number()).isEqualTo(2);
+        assertThat(replay.result().state()).isEqualTo(DocumentVersionState.AVAILABLE);
+        assertThat(replay.and().versions()).containsExactly(first.result(), replay.result());
+        assertThat(replay.and().get().orElseThrow().state()).isEqualTo(BusinessDocumentState.ARCHIVED);
+        try (var input = replay.and().content()) {
+            assertThat(input.readAllBytes()).containsExactly((byte) 7);
+        }
+        assertThat(replay.and().audit()).hasSize(5);
+    }
+
+    @Test
+    void conflictingUploadSkipsTheCallbackAndLeavesTheOriginalDocumentUnchanged() throws Exception {
+        var draft = bridge.upload(bytes).toOwner("Invoice", "42").requestId(UUID.randomUUID());
+        var original = draft.save();
+        var callbacks = new AtomicInteger();
+        assertThatThrownBy(() -> draft.metadata("changed", true).saveAndThen(document -> callbacks.incrementAndGet()))
+                .isInstanceOf(UploadRequestConflictException.class);
+        assertThat(callbacks).hasValue(0);
+        assertThat(original.and().get().orElseThrow().metadata()).isEmpty();
+        assertThat(original.and().versions()).containsExactly(original.result());
+        assertThat(original.and().audit()).hasSize(2);
+    }
+
+    @Test
     void recoveryCanBeInvokedWithoutConstructingACommand() throws Exception {
         UUID key = UUID.randomUUID();
         var pending = uploads.reserveAttach(key, "a".repeat(64), new DocumentOwnerRef("Invoice", "42"), Map.of(),
@@ -374,6 +489,12 @@ class FluentDocumentBridgeTest {
     private UUID request(DocumentVersion version) {
         return bridge.document(version.documentId()).audit().stream()
                 .filter(event -> version.id().equals(event.versionId())).findFirst().orElseThrow().requestId();
+    }
+
+    private DefaultDocumentBridge usingStore(DocumentContentStore store) {
+        return new DefaultDocumentBridge(new JpaBusinessDocumentRepository(entities, transactions),
+                new JpaDocumentVersionRepository(entities, transactions), store, uploads,
+                new JpaDocumentLifecycleRepository(entities, transactions), audits);
     }
 
     private byte[] download(DocumentVersion version) throws IOException {
