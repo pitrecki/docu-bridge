@@ -5,6 +5,7 @@ import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentContentNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.upload.PendingUpload;
 import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadChecksumUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadRequestNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
@@ -28,6 +29,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -182,12 +184,64 @@ class UploadReconciliationTest {
     }
 
     @Test
+    void pendingDiscoveryReturnsAnImmutablePageWithoutContentIoOrStateChanges() {
+        var pending = new PendingUpload(requestId, documentId, versionId);
+        uploads.pending.add(pending);
+        var page = bridge.pendingUploads(1000);
+        uploads.pending.clear();
+        assertThat(page).containsExactly(pending);
+        assertThatThrownBy(() -> page.add(pending)).isInstanceOf(UnsupportedOperationException.class);
+        assertThat(uploads.queryLimit).isEqualTo(1000);
+        assertThat(uploads.queryCursor).isNull();
+        assertThat(uploads.version.state()).isEqualTo(DocumentVersionState.PENDING);
+        assertThat(events).containsExactly("discover");
+    }
+
+    @Test
+    void pendingDiscoveryPassesTheExclusiveCursorAndReturnsAnEmptyPage() {
+        var page = bridge.pendingUploads(1, requestId);
+        assertThat(page).isEmpty();
+        assertThat(uploads.queryLimit).isEqualTo(1);
+        assertThat(uploads.queryCursor).isEqualTo(requestId);
+        assertThat(events).containsExactly("discover");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {-1, 0, 1001, Integer.MAX_VALUE})
+    void invalidPendingLimitsAreRejectedBeforeQuerying(int limit) {
+        assertThatIllegalArgumentException().isThrownBy(() -> bridge.pendingUploads(limit));
+        assertThat(events).isEmpty();
+    }
+
+    @Test
+    void pendingDiscoveryFailurePropagatesInsteadOfBecomingAnEmptyPage() {
+        uploads.discoveryFailure = new IllegalStateException("Discovery failed");
+        assertThatThrownBy(() -> bridge.pendingUploads(10)).isSameAs(uploads.discoveryFailure);
+        assertThat(events).containsExactly("discover");
+    }
+
+    @Test
+    void olderUploadRepositoriesRetainAnUnsupportedDiscoveryDefault() {
+        DocumentUploadRepository legacy = new DocumentUploadRepository() {
+            public UploadReservation reserveAttach(UUID key, String hash, DocumentOwnerRef ref, Map<String, Object> metadata) {
+                throw new AssertionError("Unexpected reservation");
+            }
+            public UploadReservation reserveVersion(UUID key, String hash, UUID document) { throw new AssertionError("Unexpected reservation"); }
+            public DocumentVersion complete(UUID key, UUID version, DocumentVersionState state) { throw new AssertionError("Unexpected finalization"); }
+        };
+        var facade = new DefaultDocumentBridge(documents, versions, content, legacy);
+        assertThatThrownBy(() -> facade.pendingUploads(10)).isInstanceOf(UnsupportedOperationException.class);
+        assertThat(events).isEmpty();
+    }
+
+    @Test
     void rejectsInvalidCommandsAndUnconfiguredRecovery() {
         assertThatNullPointerException().isThrownBy(() -> new ReconcileUpload(null, versionId));
         assertThatNullPointerException().isThrownBy(() -> new ReconcileUpload(requestId, null));
         assertThatNullPointerException().isThrownBy(() -> bridge.reconcileUpload(null));
         var readOnly = new DefaultDocumentBridge(documents, versions, content);
         assertThatThrownBy(() -> readOnly.reconcileUpload(command)).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> readOnly.pendingUploads(10)).isInstanceOf(UnsupportedOperationException.class);
     }
 
     private class Uploads implements DocumentUploadRepository {
@@ -196,6 +250,10 @@ class UploadReconciliationTest {
         RuntimeException finalizationFailure;
         boolean completeOnSecondInspection;
         int inspections;
+        final List<PendingUpload> pending = new ArrayList<>();
+        int queryLimit;
+        UUID queryCursor;
+        RuntimeException discoveryFailure;
 
         public UploadReservation reserveAttach(UUID request, String fingerprint, DocumentOwnerRef owner, Map<String, Object> metadata) {
             throw new AssertionError("Recovery must not allocate a version");
@@ -212,6 +270,13 @@ class UploadReconciliationTest {
             events.add("inspect");
             if (++inspections == 2 && completeOnSecondInspection) version = version.markAvailable();
             return new UploadRecoveryCandidate(version, expected);
+        }
+        public List<PendingUpload> findPendingUploads(int limit, UUID cursor) {
+            events.add("discover");
+            queryLimit = limit;
+            queryCursor = cursor;
+            if (discoveryFailure != null) throw discoveryFailure;
+            return pending;
         }
         public DocumentVersion completeRecovery(UUID request, UUID id, DocumentVersionState outcome) {
             assertThat(request).isEqualTo(requestId);

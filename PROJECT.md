@@ -14,7 +14,7 @@ DokuBridge is a small embeddable library for attaching documents to business ent
 
 ## Public boundary
 
-`DocumentBridge` is the application-facing entry point. Its operation set covers `AttachDocument`, `AddDocumentVersion`, `UpdateMetadata`, `Archive`, `Delete`, `Get`, `GetContent`, `FindByOwner`, `GetVersions`, `GetAudit` and explicit `ReconcileUpload`. Commands and value objects carry input validation. Public contracts must not expose JPA or filesystem implementations.
+`DocumentBridge` is the application-facing entry point. Its operation set covers `AttachDocument`, `AddDocumentVersion`, `UpdateMetadata`, `Archive`, `Delete`, `Get`, `GetContent`, `FindByOwner`, `GetVersions`, `GetAudit`, pending-upload discovery and explicit `ReconcileUpload`. Commands and value objects carry input validation. Public contracts must not expose JPA or filesystem implementations.
 
 The main model consists of `BusinessDocument`, `DocumentVersion`, `DocumentOwnerRef(type, id)` and a metadata map (`Map<String, Object>`). Audit records describe meaningful actions and upload failures.
 
@@ -473,6 +473,32 @@ or explicit reconciliation succeeds; blob existence alone is insufficient.
 Explicit reconciliation verifies published content as described below. Cleanup of
 staging files and retained blobs remains an operator responsibility.
 
+## Pending upload discovery
+
+`pendingUploads(limit)` starts a scan; `pendingUploads(limit, afterRequestId)`
+continues after an exclusive request-id cursor. Null starts the first page. Limits
+are 1..1000. Results are immutable `PendingUpload(requestId, documentId, versionId)`
+snapshots, ordered lexicographically by canonical request UUID. The semantic
+`DocumentUploadRepository.findPendingUploads` port filters PENDING versions and
+ACTIVE/ARCHIVED documents before limiting results. Deleted documents are hidden;
+legacy pending requests without a checksum remain visible. Discovery does not
+inspect blobs, allocate versions, mutate state or append audits.
+
+The JPA adapter projects identifiers in one query using existing tables/indexes,
+so retained host entities cannot supply stale states. It uses the existing short
+independent read transaction and rejects an enclosing host transaction. The host
+authorizes access to this global query. No schema or Boot wiring change is needed.
+Existing upload-enabled compositions support discovery when their upload port
+implements it; read-only compositions without that port remain unsupported.
+Custom facades and upload repositories retain unsupported default methods.
+
+Each page is a fresh snapshot. A listed upload may finish, disappear or be deleted
+before reconciliation; the existing reconciliation operation rechecks durable
+state. Concurrent inserts behind a cursor require restarting the scan to discover
+them. There is no transaction spanning pages or discovery and reconciliation, and
+no scheduler, automatic recovery or cleanup. Legacy reconciliation still requires
+the original checksum and reports its existing safe error when unavailable.
+
 ## Explicit upload reconciliation
 
 `reconcileUpload(ReconcileUpload(requestId, versionId))` checks the request/version
@@ -500,7 +526,8 @@ It can inspect an active upload safely: before publication it leaves `PENDING`;
 after publication it may finalize before the original uploader. It never retries
 `store`, resets `FAILED`, allocates versions, updates document revision, deletes
 content, or makes a logically deleted document visible. The host authorizes this
-operation. There is no scheduler, timeout, batch discovery or cleanup process.
+operation. Pending-upload discovery above is explicit; there is no scheduler,
+timeout or cleanup process.
 
 Migration V3 adds nullable `expected_sha256` and the recovery audit actions; V1/V2
 remain unchanged. New facade reservations record the checksum atomically with the

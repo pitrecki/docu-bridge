@@ -12,6 +12,7 @@ import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentContentUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.upload.PendingUpload;
 import io.github.pitrecki.dokubridge.core.domain.document.exception.DocumentNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadChecksumUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadRequestConflictException;
@@ -19,6 +20,7 @@ import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadRequestN
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
 import io.github.pitrecki.dokubridge.core.port.in.document.Delete;
+import io.github.pitrecki.dokubridge.core.port.in.document.Archive;
 import io.github.pitrecki.dokubridge.core.port.in.upload.AddDocumentVersion;
 import io.github.pitrecki.dokubridge.core.port.in.upload.AttachDocument;
 import io.github.pitrecki.dokubridge.core.port.in.upload.ReconcileUpload;
@@ -128,6 +130,122 @@ class JpaUploadReconciliationTest {
             assertThat(input.readAllBytes()).containsExactly(bytes);
         }
         assertActions(recovered, DocumentAuditAction.DOCUMENT_ATTACHED, DocumentAuditAction.UPLOAD_RECOVERED);
+    }
+
+    @Test
+    void discoveryFiltersTerminalAndDeletedUploadsBeforeApplyingThePageLimit() {
+        UUID deletedKey = new UUID(0, 1);
+        var deleted = reserve(deletedKey);
+        bridge.delete(new Delete(deleted.documentId()));
+        UUID availableKey = new UUID(0, 2);
+        var available = reserve(availableKey);
+        uploads.complete(availableKey, available.id(), DocumentVersionState.AVAILABLE);
+        UUID failedKey = new UUID(0, 3);
+        var failed = reserve(failedKey);
+        uploads.complete(failedKey, failed.id(), DocumentVersionState.FAILED);
+        UUID activeKey = new UUID(0, 4);
+        var active = reserve(activeKey);
+        UUID archivedKey = new UUID(0, 5);
+        var archived = uploads.reserveAttach(archivedKey, fingerprint, new DocumentOwnerRef("Order", "other-owner"),
+                Map.of(), checksum).version();
+        bridge.archive(new Archive(archived.documentId()));
+        var guarded = bridge(new DocumentContentStore() {
+            public void store(UUID id, InputStream source) { throw new AssertionError("Discovery must not write content"); }
+            public InputStream open(UUID id) { throw new AssertionError("Discovery must not read content"); }
+        });
+        assertThat(guarded.pendingUploads(1)).containsExactly(new PendingUpload(activeKey, active.documentId(), active.id()));
+        assertThat(guarded.pendingUploads(1, activeKey))
+                .containsExactly(new PendingUpload(archivedKey, archived.documentId(), archived.id()));
+        assertThat(guarded.pendingUploads(1, archivedKey)).isEmpty();
+        assertThat(uploads.inspectForRecovery(activeKey, active.id()).version()).isEqualTo(active);
+        assertActions(active, DocumentAuditAction.DOCUMENT_ATTACHED);
+        assertActions(archived, DocumentAuditAction.DOCUMENT_ATTACHED, DocumentAuditAction.DOCUMENT_ARCHIVED);
+    }
+
+    @Test
+    void discoveryUsesCanonicalUuidOrderAndAnExclusiveCursorAcrossPages() {
+        UUID low = UUID.fromString("7fffffff-ffff-ffff-ffff-ffffffffffff");
+        UUID middle = UUID.fromString("80000000-0000-0000-0000-000000000000");
+        UUID high = UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff");
+        var last = reserve(high);
+        var first = reserve(low);
+        var second = reserve(middle);
+        var page = bridge.pendingUploads(2);
+        var firstRow = new PendingUpload(low, first.documentId(), first.id());
+        var secondRow = new PendingUpload(middle, second.documentId(), second.id());
+        assertThat(page).containsExactly(firstRow, secondRow);
+        assertThat(bridge.pendingUploads(2, middle)).containsExactly(new PendingUpload(high, last.documentId(), last.id()));
+        assertThat(bridge.pendingUploads(2, high)).isEmpty();
+        assertThatThrownBy(() -> page.add(firstRow)).isInstanceOf(UnsupportedOperationException.class);
+        uploads.complete(low, first.id(), DocumentVersionState.AVAILABLE);
+        assertThat(page).containsExactly(firstRow, secondRow);
+        assertThat(bridge.pendingUploads(1)).containsExactly(secondRow);
+    }
+
+    @Test
+    void discoveryIncludesLegacyPendingRequestsWithoutGuessingTheirChecksum() {
+        var legacy = uploads.reserveAttach(request, fingerprint, owner, Map.of()).version();
+        var row = bridge.pendingUploads(1000).getFirst();
+        assertThat(row).isEqualTo(new PendingUpload(request, legacy.documentId(), legacy.id()));
+        assertThatThrownBy(() -> bridge.reconcileUpload(row.requestId(), row.versionId()))
+                .isInstanceOf(UploadChecksumUnavailableException.class);
+        assertThat(bridge.pendingUploads(1)).containsExactly(row);
+        assertActions(legacy, DocumentAuditAction.DOCUMENT_ATTACHED);
+    }
+
+    @Test
+    void discoveredUploadCanBeReconciledAndThenDisappearsFromNewPages() throws Exception {
+        var pending = reserve();
+        content.store(pending.id(), new ByteArrayInputStream(bytes));
+        var page = bridge.pendingUploads(10);
+        var row = page.getFirst();
+        var recovered = bridge.reconcileUpload(row.requestId(), row.versionId());
+        assertThat(recovered.state()).isEqualTo(DocumentVersionState.AVAILABLE);
+        assertThat(bridge.pendingUploads(10)).isEmpty();
+        assertThat(page).containsExactly(new PendingUpload(request, pending.documentId(), pending.id()));
+        assertThat(bridge.get(pending.documentId()).orElseThrow().revision()).isZero();
+        assertActions(pending, DocumentAuditAction.DOCUMENT_ATTACHED, DocumentAuditAction.UPLOAD_RECOVERED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"complete", "delete"})
+    void discoveryIgnoresStaleHostEntitiesAfterACommittedChange(String change) throws Exception {
+        var pending = reserve();
+        var retained = factory.getObject().createEntityManager();
+        try {
+            retained.find(DocumentVersionEntity.class, pending.id());
+            retained.find(io.github.pitrecki.dokubridge.adapter.jpa.document.persistence.BusinessDocumentEntity.class, pending.documentId());
+            TransactionSynchronizationManager.bindResource(factory.getObject(), new EntityManagerHolder(retained));
+            assertThat(bridge.pendingUploads(10)).hasSize(1);
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                executor.submit(() -> {
+                    if (change.equals("complete")) uploads.complete(request, pending.id(), DocumentVersionState.AVAILABLE);
+                    else bridge.delete(new Delete(pending.documentId()));
+                }).get(20, TimeUnit.SECONDS);
+            }
+            assertThat(bridge.pendingUploads(10)).isEmpty();
+        } finally {
+            if (TransactionSynchronizationManager.hasResource(factory.getObject())) {
+                TransactionSynchronizationManager.unbindResource(factory.getObject());
+            }
+            retained.close();
+        }
+    }
+
+    @Test
+    void discoveryRejectsAnEnclosingHostTransaction() {
+        var pending = reserve();
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+                assertThatIllegalStateException().isThrownBy(() -> bridge.pendingUploads(10))
+                        .withMessageContaining("host transaction"));
+        assertThat(bridge.pendingUploads(10)).containsExactly(new PendingUpload(request, pending.documentId(), pending.id()));
+        assertActions(pending, DocumentAuditAction.DOCUMENT_ATTACHED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {-1, 0, 1001, Integer.MAX_VALUE})
+    void discoveryAdapterRejectsInvalidLimits(int limit) {
+        assertThatIllegalArgumentException().isThrownBy(() -> uploads.findPendingUploads(limit, null));
     }
 
     @Test
@@ -371,7 +489,11 @@ class JpaUploadReconciliationTest {
     }
 
     private DocumentVersion reserve() {
-        return uploads.reserveAttach(request, fingerprint, owner, Map.of(), checksum).version();
+        return reserve(request);
+    }
+
+    private DocumentVersion reserve(UUID key) {
+        return uploads.reserveAttach(key, fingerprint, owner, Map.of(), checksum).version();
     }
 
     private ReconcileUpload command(DocumentVersion version) {

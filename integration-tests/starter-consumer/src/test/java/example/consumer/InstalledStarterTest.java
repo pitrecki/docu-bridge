@@ -3,12 +3,19 @@ package example.consumer;
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditAction;
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
+import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
+import io.github.pitrecki.dokubridge.core.port.in.document.DocumentHandle;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,6 +58,7 @@ class InstalledStarterTest {
             assertThat(saved.and().versions()).containsExactly(saved.result());
             assertThat(saved.and().audit()).extracting(DocumentAuditEntry::action)
                     .containsExactly(DocumentAuditAction.DOCUMENT_ATTACHED, DocumentAuditAction.UPLOAD_SUCCEEDED);
+            verifyInFlightDiscovery(bridge, saved.and(), bytes);
 
             var found = bridge.documentsForOwner("Invoice", "external-42").getFirst();
             assertThat(found.result().id()).isEqualTo(saved.result().documentId());
@@ -67,6 +75,43 @@ class InstalledStarterTest {
             assertThat(bridge.findDocument(saved.result().documentId())).isEmpty();
             assertThat(bridge.documentsForOwner("Invoice", "external-42")).isEmpty();
             assertThat(found.result().metadata()).containsEntry("origin", "external");
+        }
+    }
+
+    private void verifyInFlightDiscovery(DocumentBridge bridge, DocumentHandle document, byte[] bytes) throws Exception {
+        var reading = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        UUID key = UUID.randomUUID();
+        try (var source = new InputStream() {
+            final InputStream delegate = new ByteArrayInputStream(bytes);
+            public int read() throws IOException {
+                reading.countDown();
+                try {
+                    if (!release.await(20, TimeUnit.SECONDS)) throw new IOException("Upload was not released");
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Upload interrupted", interrupted);
+                }
+                return delegate.read();
+            }
+        }; var executor = Executors.newSingleThreadExecutor()) {
+            var uploading = executor.submit(() -> document.upload(source, ContentSha256.of(bytes)).requestId(key).save());
+            try {
+                assertThat(reading.await(15, TimeUnit.SECONDS)).isTrue();
+                var page = bridge.pendingUploads(100);
+                assertThat(page).singleElement().satisfies(pending -> {
+                    assertThat(pending.requestId()).isEqualTo(key);
+                    assertThat(pending.documentId()).isEqualTo(document.id());
+                });
+                var pending = page.getFirst();
+                assertThat(bridge.reconcileUpload(pending.requestId(), pending.versionId()).state())
+                        .isEqualTo(DocumentVersionState.PENDING);
+            } finally {
+                release.countDown();
+            }
+            assertThat(uploading.get(20, TimeUnit.SECONDS).result().state()).isEqualTo(DocumentVersionState.AVAILABLE);
+            assertThat(bridge.pendingUploads(100)).isEmpty();
+            assertThat(document.versions()).hasSize(2);
         }
     }
 }

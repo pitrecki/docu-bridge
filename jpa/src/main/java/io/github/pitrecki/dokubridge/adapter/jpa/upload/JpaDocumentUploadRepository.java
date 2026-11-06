@@ -9,6 +9,7 @@ import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocumentState;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
 import io.github.pitrecki.dokubridge.core.domain.document.exception.DocumentNotFoundException;
+import io.github.pitrecki.dokubridge.core.domain.upload.PendingUpload;
 import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadChecksumUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadRequestConflictException;
 import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadRequestNotFoundException;
@@ -19,6 +20,7 @@ import io.github.pitrecki.dokubridge.core.port.out.upload.UploadRecoveryCandidat
 import io.github.pitrecki.dokubridge.core.port.out.upload.UploadReservation;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -124,6 +126,28 @@ public final class JpaDocumentUploadRepository implements DocumentUploadReposito
             entities.refresh(version);
             return new UploadRecoveryCandidate(version.snapshot(),
                     Optional.ofNullable(request.expectedSha256()).map(ContentSha256::new));
+        });
+    }
+
+    @Override
+    public List<PendingUpload> findPendingUploads(int limit, UUID afterRequestId) {
+        requireIndependentCall();
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("Pending upload limit must be between 1 and 1000");
+        }
+        return read.execute(status -> {
+            var query = entities.createQuery("""
+                    select new io.github.pitrecki.dokubridge.core.domain.upload.PendingUpload(r.id, v.documentId, v.id)
+                    from UploadRequestEntity r, DocumentVersionEntity v, BusinessDocumentEntity d
+                    where r.versionId = v.id and v.documentId = d.id
+                      and v.state = :pending and d.state in :visible
+                    """ + (afterRequestId == null ? "" : " and r.id > :after")
+                    + " order by r.id", PendingUpload.class)
+                    .setParameter("pending", DocumentVersionState.PENDING)
+                    .setParameter("visible", List.of(BusinessDocumentState.ACTIVE, BusinessDocumentState.ARCHIVED))
+                    .setMaxResults(limit);
+            if (afterRequestId != null) query.setParameter("after", afterRequestId);
+            return List.copyOf(query.getResultList());
         });
     }
 

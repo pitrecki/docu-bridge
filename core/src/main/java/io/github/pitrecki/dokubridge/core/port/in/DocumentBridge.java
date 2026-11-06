@@ -5,6 +5,7 @@ import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentContentUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.upload.PendingUpload;
 import io.github.pitrecki.dokubridge.core.domain.document.exception.DocumentNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.domain.version.exception.DocumentVersionNotFoundException;
@@ -80,6 +81,22 @@ public interface DocumentBridge {
 
     default DocumentVersion reconcileUpload(UUID requestId, UUID versionId) throws IOException {
         return reconcileUpload(new ReconcileUpload(requestId, versionId));
+    }
+
+    /** Starts a pending-upload scan with a page size from 1 to 1000. */
+    default List<PendingUpload> pendingUploads(int limit) {
+        return pendingUploads(limit, null);
+    }
+
+    /**
+     * Lists PENDING uploads of ACTIVE/ARCHIVED documents without reading content or changing state.
+     * Results are immutable and ordered lexicographically by canonical request UUID, after the
+     * exclusive cursor. A null cursor starts the first page. Page size must be from 1 to 1000.
+     * Pages are independent snapshots; concurrent inserts may require a new scan from the start.
+     * The host authorizes access and calls outside host transactions, as with reconciliation.
+     */
+    default List<PendingUpload> pendingUploads(int limit, UUID afterRequestId) {
+        throw new UnsupportedOperationException("Pending upload discovery is not configured");
     }
 
     /**

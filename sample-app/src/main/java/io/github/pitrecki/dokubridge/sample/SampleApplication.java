@@ -51,7 +51,8 @@ public class SampleApplication {
         byte[] original = found.and().readContent(first.id(), InputStream::readAllBytes);
         if (!Arrays.equals(original, initial)) throw new IOException("Original content differs");
         if (first.state() != DocumentVersionState.AVAILABLE || second.number() != 2
-                || document.get().isEmpty()) {
+                || document.get().isEmpty()
+                || bridge.pendingUploads(1000).stream().anyMatch(pending -> pending.documentId().equals(first.documentId()))) {
             throw new IllegalStateException("Document workflow failed");
         }
         var history = document.versions();
@@ -78,6 +79,6 @@ public class SampleApplication {
                 || bridge.documentsForOwner("Invoice", "sample-42").stream().anyMatch(candidate -> candidate.result().id().equals(first.documentId()))) {
             throw new IllegalStateException("Deleted document is still visible");
         }
-        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with managed content reads, document lookup, owner lookup, version history 1 and 2, audited events, metadata, archive and logical deletion");
+        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with pending discovery, managed content reads, document lookup, owner lookup, version history 1 and 2, audited events, metadata, archive and logical deletion");
     }
 }

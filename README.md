@@ -498,6 +498,38 @@ never backfills the checksum from caller input. There is no recovery scheduler o
 cleanup process. See [PROJECT.md](PROJECT.md#explicit-upload-reconciliation) for
 adapter guarantees and legacy limitations.
 
+## Pending upload discovery
+
+Discover uploads to inspect without knowing their request/version ids beforehand:
+
+```java
+var page = bridge.pendingUploads(100);
+if (!page.isEmpty()) {
+    var nextPage = bridge.pendingUploads(100, page.getLast().requestId());
+}
+```
+
+Each `PendingUpload` exposes `requestId()`, `documentId()` and `versionId()`. Pass a
+chosen entry's request/version ids to `reconcileUpload` when you want to verify it.
+Listing itself reads no files, changes no state and writes no audit. It can include
+uploads still in progress. Legacy pending uploads without a recorded checksum are
+included; their reconciliation retains the `UploadChecksumUnavailableException`
+behavior described above.
+
+Pages are immutable, with a size from 1 to 1000, ordered lexicographically by the
+canonical request UUID. The cursor is exclusive; null starts the first page.
+Only `PENDING` uploads of active or archived documents are returned; deleted
+documents and terminal versions are excluded before applying the limit. An empty
+page ends the current scan. Pages are independent snapshots: concurrent inserts
+behind the cursor require a new scan from the start, and an entry may finish
+before you reconcile it.
+
+The host authorizes this global query and invokes it outside host transactions,
+like reconciliation. The existing upload repository composition enables discovery;
+read-only compositions without that port remain unsupported. Custom repositories
+and facades inherit unsupported defaults until they implement discovery. JPA uses
+the existing tables and indexes, with no migration or new dependency.
+
 ## Metadata and lifecycle
 
 ```java

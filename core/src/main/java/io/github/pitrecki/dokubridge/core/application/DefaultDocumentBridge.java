@@ -6,6 +6,7 @@ import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentConte
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocumentState;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.upload.PendingUpload;
 import io.github.pitrecki.dokubridge.core.domain.document.exception.DocumentNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
@@ -96,6 +97,11 @@ public final class DefaultDocumentBridge implements DocumentBridge {
     public DocumentVersion reconcileUpload(ReconcileUpload command) throws IOException {
         Objects.requireNonNull(command, "Reconciliation command must not be null");
         return uploadOperations().reconcileUpload(command);
+    }
+
+    @Override
+    public List<PendingUpload> pendingUploads(int limit, UUID afterRequestId) {
+        return uploadOperations().pendingUploads(limit, afterRequestId);
     }
 
     @Override

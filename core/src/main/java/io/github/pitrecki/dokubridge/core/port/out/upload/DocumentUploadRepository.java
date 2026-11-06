@@ -2,8 +2,10 @@ package io.github.pitrecki.dokubridge.core.port.out.upload;
 
 import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.upload.PendingUpload;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -37,6 +39,16 @@ public interface DocumentUploadRepository {
     /** Reads a fresh committed snapshot, checks the request/version association, and closes its transaction. */
     default UploadRecoveryCandidate inspectForRecovery(UUID requestId, UUID versionId) {
         throw new UnsupportedOperationException("Upload reconciliation is not supported by this repository");
+    }
+
+    /**
+     * Reads a fresh page of PENDING uploads whose documents are ACTIVE or ARCHIVED.
+     * Filter before applying the limit (1..1000); order by canonical request UUID
+     * lexicographically and exclude ids at or before the cursor. Null starts the first page.
+     * Legacy requests without a checksum are included. No content I/O or mutation is allowed.
+     */
+    default List<PendingUpload> findPendingUploads(int limit, UUID afterRequestId) {
+        throw new UnsupportedOperationException("Pending upload discovery is not supported by this repository");
     }
 
     /** Finalizes a verified recovery with its own audit; a matching terminal outcome is a no-op. */

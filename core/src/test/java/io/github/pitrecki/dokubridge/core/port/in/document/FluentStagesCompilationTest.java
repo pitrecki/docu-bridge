@@ -49,6 +49,10 @@ class FluentStagesCompilationTest {
                 }
                 bridge.findDocument(id).ifPresent(found -> found.and()
                         .replaceMetadata(metadata).atRevision(found.result().revision()).save());
+                for (var pending : bridge.pendingUploads(100)) {
+                    bridge.reconcileUpload(pending.requestId(), pending.versionId());
+                    bridge.pendingUploads(100, pending.requestId());
+                }
                 document.delete();
                 """, diagnostics)).withFailMessage(diagnostics.getDiagnostics().toString()).isTrue();
     }

@@ -4,6 +4,7 @@ import com.google.common.io.Closer;
 import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.content.exception.ContentChecksumMismatchException;
 import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentContentNotFoundException;
+import io.github.pitrecki.dokubridge.core.domain.upload.PendingUpload;
 import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadChecksumUnavailableException;
 import io.github.pitrecki.dokubridge.core.domain.upload.exception.UploadRequestNotFoundException;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
@@ -19,6 +20,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.security.DigestInputStream;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -30,6 +32,13 @@ public final class DocumentUploads {
     public DocumentUploads(DocumentContentStore content, DocumentUploadRepository uploads) {
         this.content = Objects.requireNonNull(content);
         this.uploads = Objects.requireNonNull(uploads);
+    }
+
+    public List<PendingUpload> pendingUploads(int limit, UUID afterRequestId) {
+        if (limit < 1 || limit > 1000) {
+            throw new IllegalArgumentException("Pending upload limit must be between 1 and 1000");
+        }
+        return List.copyOf(uploads.findPendingUploads(limit, afterRequestId));
     }
 
     public DocumentVersion reconcileUpload(ReconcileUpload command) throws IOException {
