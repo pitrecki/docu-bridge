@@ -45,6 +45,18 @@ public interface DocumentBridge {
         return new DocumentHandle(this, documentId);
     }
 
+    /**
+     * Reads a visible document once and binds its snapshot to a fluent continuation.
+     * Missing or deleted documents return an empty Optional, as with {@link #get(UUID)}.
+     * {@code result()} retains the query snapshot; subsequent operations through
+     * {@code and()} use current state. No content version is selected or opened.
+     * The host application authorizes access.
+     */
+    default Optional<DocumentResult<BusinessDocument>> findDocument(UUID documentId) {
+        return get(Objects.requireNonNull(documentId, "Document id must not be null"))
+                .map(document -> DocumentResult.found(this, document));
+    }
+
     default List<BusinessDocument> findByOwner(String type, String id) {
         return findByOwner(new DocumentOwnerRef(type, id));
     }

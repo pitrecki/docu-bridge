@@ -389,7 +389,7 @@ class JpaDocumentLifecycleRepositoryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"get", "findByOwner", "getContent", "getVersions", "getAudit"})
+    @ValueSource(strings = {"get", "findDocument", "findByOwner", "getContent", "getVersions", "getAudit"})
     void retainedHostContextCannotExposeACommittedDeletion(String operation) throws Exception {
         var version = newDocument();
         var retained = factory.getObject().createEntityManager();
@@ -406,6 +406,7 @@ class JpaDocumentLifecycleRepositoryTest {
             });
             switch (operation) {
                 case "get" -> assertThat(guarded.get(version.documentId())).isEmpty();
+                case "findDocument" -> assertThat(guarded.findDocument(version.documentId())).isEmpty();
                 case "findByOwner" -> assertThat(guarded.findByOwner(owner)).isEmpty();
                 case "getVersions" -> assertThatThrownBy(() -> guarded.getVersions(version.documentId()))
                         .isInstanceOf(DocumentNotFoundException.class);
@@ -424,7 +425,7 @@ class JpaDocumentLifecycleRepositoryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"get", "findByOwner"})
+    @ValueSource(strings = {"get", "findDocument", "findByOwner"})
     void retainedHostContextReturnsCommittedMetadataRevisionAndState(String operation) throws Exception {
         var version = newDocument();
         var retained = factory.getObject().createEntityManager();
@@ -439,8 +440,12 @@ class JpaDocumentLifecycleRepositoryTest {
                     return bridge.archive(new Archive(version.documentId()));
                 }).get(20, TimeUnit.SECONDS);
             }
-            var result = operation.equals("get") ? bridge.get(version.documentId()).orElseThrow()
-                    : bridge.findByOwner(owner).getFirst();
+            var result = switch (operation) {
+                case "get" -> bridge.get(version.documentId()).orElseThrow();
+                case "findDocument" -> bridge.findDocument(version.documentId()).orElseThrow().result();
+                case "findByOwner" -> bridge.findByOwner(owner).getFirst();
+                default -> throw new AssertionError("Unknown read operation");
+            };
             assertThat(result).isEqualTo(changed);
             assertThat(result.revision()).isEqualTo(2);
             assertThat(result.metadata()).containsOnlyKeys("new");

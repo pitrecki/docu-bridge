@@ -304,7 +304,8 @@ replay. Supply a fresh stream for a new upload. Large content can use this path
 without the byte-array snapshot. Checksums accept `ContentSha256` or its hex string;
 `ContentSha256.of(bytes)` is available for callers that need the value explicitly.
 
-For a document id obtained elsewhere, `bridge.document(id)` binds the id without
+For a document id obtained elsewhere, `bridge.findDocument(id)` reads a snapshot
+with a continuation, as shown below. `bridge.document(id)` binds the id without
 loading or caching its state. Its
 terminal reads are `get()`, `versions()`, `audit()` and `content(versionId)`;
 callers close returned content streams. `upload(...)` starts a version draft,
@@ -317,6 +318,29 @@ Fluent operations call the existing command/query facade. Visibility, authorizat
 by the host, version numbering, revision conflicts, audit and transaction behavior
 remain the same. Existing command-based calls and custom facade implementations
 remain supported; no additional Spring bean or storage adapter is needed.
+
+### Document by id
+
+`findDocument(id)` returns `Optional<DocumentResult<BusinessDocument>>`. Read the
+snapshot through `result()` and continue through `and()` without another lookup:
+
+```java
+bridge.findDocument(documentId).ifPresent(found -> {
+    found.and().replaceMetadata(Map.of("category", "reviewed"))
+        .atRevision(found.result().revision())
+        .save();
+});
+```
+
+Active and archived documents are visible; a missing or deleted document returns
+an empty Optional. Query errors propagate. The snapshot stays unchanged by later
+operations; continuations check current state, so stale metadata revisions can
+conflict and deletion can make a subsequent operation fail. The query selects no
+content version; use `content(versionId)` for downloads. The host authorizes access.
+Lookup and subsequent operations retain their own transaction boundaries.
+Existing `get(id)` still returns a domain snapshot, while `document(id)` binds a
+context without a lookup. Custom facades inherit `findDocument` through their
+existing `get` implementation.
 
 ### Documents by owner
 
@@ -445,10 +469,9 @@ adapter guarantees and legacy limitations.
 ## Metadata and lifecycle
 
 ```java
-var document = bridge.document(documentId);
-var current = document.get().orElseThrow();
-var updated = document.replaceMetadata(Map.of("category", "revised"))
-    .atRevision(current.revision())
+var found = bridge.findDocument(documentId).orElseThrow();
+var updated = found.and().replaceMetadata(Map.of("category", "revised"))
+    .atRevision(found.result().revision())
     .save();
 updated.and().archive().and().delete();
 ```
@@ -516,7 +539,7 @@ After `./mvnw verify`:
 java -jar sample-app/target/dokubridge-sample-app-0.1.0-SNAPSHOT.jar
 ```
 
-The console application uses fluent continuations, callbacks and owner lookup, enables library schema initialization,
+The console application uses fluent continuations, callbacks and document/owner lookups, enables library schema initialization,
 validates the JPA schema, attaches a document, replays the request, adds version 2 and verifies its
 download, ordered version history and audit through `DocumentBridge`. It then
 replaces metadata, archives and logically deletes that example document, verifies read invisibility, prints its id

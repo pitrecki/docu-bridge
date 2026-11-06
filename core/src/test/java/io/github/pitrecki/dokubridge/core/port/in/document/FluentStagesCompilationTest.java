@@ -44,6 +44,8 @@ class FluentStagesCompilationTest {
                     found.and().replaceMetadata(metadata).atRevision(found.result().revision())
                             .saveAndThen(updated -> updated.archive());
                 }
+                bridge.findDocument(id).ifPresent(found -> found.and()
+                        .replaceMetadata(metadata).atRevision(found.result().revision()).save());
                 document.delete();
                 """, diagnostics)).withFailMessage(diagnostics.getDiagnostics().toString()).isTrue();
     }

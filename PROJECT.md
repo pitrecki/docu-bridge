@@ -57,6 +57,17 @@ Fluent archive returns the same result wrapper. Command-based facade methods kee
 their original domain return types; existing fluent clients obtain those snapshots
 with `save().result()` or `archive().result()`.
 
+`findDocument(id)` returns `Optional<DocumentResult<BusinessDocument>>` by wrapping
+one existing `get(id)` invocation. Active and archived documents are visible;
+missing, deleted or foreign adapter snapshots are absent through the existing read
+facade. Null ids are rejected before querying, and repository failures propagate.
+The result retains its immutable query snapshot and a continuation bound to the
+same facade. Accessing `result()` or `and()` causes no additional lookup or content
+I/O. No content version is selected. Continuations use current state with normal
+deletion and revision checks; there is no transaction spanning lookup and later
+operations. Host authorization remains external. Existing `get` and `document`
+methods retain their contracts; custom facades inherit this query through `get`.
+
 `documentsForOwner(type, id)` and its `DocumentOwnerRef` overload return an immutable
 list of `DocumentResult<BusinessDocument>`. They wrap one `findByOwner` invocation,
 preserve its visible snapshots and order, and bind each continuation to that same
@@ -129,7 +140,7 @@ BOM without inheriting the library parent, so missing transitive dependencies or
 invalid installed POMs cannot be hidden by reactor resolution. CI runs `install`
 first, including the full library and packaged-sample suite, then verifies this
 consumer against PostgreSQL. Its fluent flow covers upload/replay, content and
-audit reads, owner results, metadata revision checks, archive and deletion.
+audit reads, document/owner results, metadata revision checks, archive and deletion.
 
 `scripts/verify-consumer.sh` evaluates the root project's effective version through
 the Maven Help plugin and supplies it as `dokubridge.version` to the separate

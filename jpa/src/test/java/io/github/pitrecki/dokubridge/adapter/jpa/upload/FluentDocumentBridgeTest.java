@@ -528,6 +528,52 @@ class FluentDocumentBridgeTest {
     }
 
     @Test
+    void documentLookupRetainsItsSnapshotWhileContinuationsUseCurrentRevisionAndState() throws Exception {
+        var saved = bridge.upload(bytes).toOwner("Invoice", "42").metadata("category", "original").save();
+        var found = bridge.findDocument(saved.and().id()).orElseThrow();
+        var updated = found.and().replaceMetadata(Map.of("category", "changed"))
+                .atRevision(found.result().revision()).save();
+        assertThatThrownBy(() -> found.and().replaceMetadata(Map.of()).atRevision(found.result().revision()).save())
+                .isInstanceOf(DocumentRevisionConflictException.class);
+        var archived = updated.and().archive();
+        var fresh = bridge.findDocument(found.result().id()).orElseThrow();
+        assertThat(fresh.result()).isEqualTo(archived.result());
+        assertThat(fresh.result().revision()).isEqualTo(2);
+        var next = fresh.and().upload(new byte[]{7}).save();
+        assertThat(next.result().documentId()).isEqualTo(found.result().id());
+        assertThat(next.result().number()).isEqualTo(2);
+        try (var input = next.and().content()) {
+            assertThat(input.readAllBytes()).containsExactly((byte) 7);
+        }
+        assertThat(found.result().state()).isEqualTo(BusinessDocumentState.ACTIVE);
+        assertThat(found.result().metadata()).containsEntry("category", "original");
+        assertThat(found.result().revision()).isZero();
+        assertThat(found.and().get()).contains(archived.result());
+        assertThat(found.and().versions()).containsExactly(saved.result(), next.result());
+        assertThat(found.and().audit()).hasSize(6);
+    }
+
+    @Test
+    void documentLookupHidesMissingOrDeletedDocumentsAndExistingContinuationsCannotReadOrWriteThem() throws Exception {
+        assertThat(bridge.findDocument(UUID.randomUUID())).isEmpty();
+        var saved = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var found = bridge.findDocument(saved.and().id()).orElseThrow();
+        saved.and().delete();
+
+        assertThat(bridge.findDocument(found.result().id())).isEmpty();
+        assertThat(found.result().state()).isEqualTo(BusinessDocumentState.ACTIVE);
+        assertThat(found.and().get()).isEmpty();
+        assertThatThrownBy(found.and()::versions).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(found.and()::audit).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(() -> found.and().content(saved.result().id())).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(found.and()::archive).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(() -> found.and().replaceMetadata(Map.of()).atRevision(found.result().revision()).save())
+                .isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(() -> found.and().upload(bytes).save()).isInstanceOf(DocumentNotFoundException.class);
+        assertThat(audits.findByDocument(saved.and().id())).hasSize(3);
+    }
+
+    @Test
     void recoveryCanBeInvokedWithoutConstructingACommand() throws Exception {
         UUID key = UUID.randomUUID();
         var pending = uploads.reserveAttach(key, "a".repeat(64), new DocumentOwnerRef("Invoice", "42"), Map.of(),

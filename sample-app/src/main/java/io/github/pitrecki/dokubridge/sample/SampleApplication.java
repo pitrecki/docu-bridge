@@ -67,12 +67,15 @@ public class SampleApplication {
                 DocumentAuditAction.METADATA_UPDATED, DocumentAuditAction.DOCUMENT_ARCHIVED))) {
             throw new IllegalStateException("Archived audit differs");
         }
-        document.delete();
+        var loaded = bridge.findDocument(first.documentId()).orElseThrow();
+        if (!loaded.result().equals(archived.result())) throw new IllegalStateException("Document lookup snapshot differs");
+        loaded.and().delete();
         document.delete();
         if (document.get().isPresent()
+                || bridge.findDocument(first.documentId()).isPresent()
                 || bridge.documentsForOwner("Invoice", "sample-42").stream().anyMatch(candidate -> candidate.result().id().equals(first.documentId()))) {
             throw new IllegalStateException("Deleted document is still visible");
         }
-        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with owner lookup, version history 1 and 2, audited events, metadata, archive and logical deletion");
+        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with document lookup, owner lookup, version history 1 and 2, audited events, metadata, archive and logical deletion");
     }
 }

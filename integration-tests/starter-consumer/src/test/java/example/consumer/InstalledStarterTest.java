@@ -58,8 +58,11 @@ class InstalledStarterTest {
                     .atRevision(found.result().revision()).save();
             assertThat(updated.result().revision()).isEqualTo(1);
             assertThat(updated.and().get().orElseThrow().metadata()).containsEntry("origin", "fluent");
-            updated.and().archive().and().delete();
+            var loaded = bridge.findDocument(saved.result().documentId()).orElseThrow();
+            assertThat(loaded.result()).isEqualTo(updated.result());
+            loaded.and().archive().and().delete();
             assertThat(saved.and().get()).isEmpty();
+            assertThat(bridge.findDocument(saved.result().documentId())).isEmpty();
             assertThat(bridge.documentsForOwner("Invoice", "external-42")).isEmpty();
             assertThat(found.result().metadata()).containsEntry("origin", "external");
         }
