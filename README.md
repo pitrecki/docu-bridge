@@ -43,6 +43,29 @@ To run just the filesystem adapter and its core prerequisite:
 ./mvnw -pl filesystem -am verify
 ```
 
+## Library artifacts
+
+`package` and `verify` attach `-sources.jar` and `-javadoc.jar` alongside the
+compiled JAR for `core`, `filesystem`, `jpa` and `autoconfigure`. Outputs are in
+each module's `target` directory; for example:
+
+```text
+core/target/dokubridge-core-0.1.0-SNAPSHOT.jar
+core/target/dokubridge-core-0.1.0-SNAPSHOT-sources.jar
+core/target/dokubridge-core-0.1.0-SNAPSHOT-javadoc.jar
+```
+
+Run `./mvnw install` to install all modules, their parent POM and attached
+artifacts into the local Maven repository. Other projects can then depend on
+`dokubridge-starter`; IDEs can resolve library source and API documentation through
+the standard Maven classifiers. The host manages its Spring Boot version through
+its own parent or BOM.
+
+Javadoc validates references and markup during the normal build. Missing comments
+are allowed; broken documentation fails the build. Documentation generation does
+not fetch external API links. The dependency-only starter and executable sample
+produce their existing JARs without source or Javadoc attachments.
+
 ## Ports and adapters
 
 The common namespace is `io.github.pitrecki.dokubridge`. Source packages follow

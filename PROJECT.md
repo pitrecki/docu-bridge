@@ -47,6 +47,15 @@ The database-first sequence is intentional. Database transactions do not encompa
 
 `DefaultDocumentBridge` remains technology-neutral. JPA implements repository ports; it is not a second document facade. Avoid a generic transaction runner or database-specific assumptions in the core.
 
+The four code-bearing library modules (`core`, `filesystem`, `jpa`,
+`autoconfigure`) attach source and Javadoc JARs during `package`. Plugin versions
+and configuration are shared in the parent; each library explicitly enables the
+attachments. Javadoc checks references and markup without requiring every type
+to have a comment or fetching external API documentation. Normal `verify` checks
+this packaging, and `install` makes the compiled/source/documentation artifacts
+available to independent Maven consumers. Starter remains a dependency bundle;
+sample packaging remains executable. These are build-time plugins only.
+
 ## Engineering priorities
 
 Correct state transitions and failure handling matter more than adding features. Prefer a small public API, explicit invariants, short transactions, deterministic tests and understandable code. Verify persistence with PostgreSQL, cover edge cases around storage failure and concurrent version creation, and keep docs restricted to decisions that matter to maintainers and consumers.
