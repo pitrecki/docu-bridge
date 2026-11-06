@@ -36,8 +36,9 @@ The `core` module contains the domain snapshots, immutable JSON metadata and the
 facade `DocumentBridge`, implemented by `DefaultDocumentBridge`. Its outbound
 ports are `BusinessDocumentRepository`, `DocumentVersionRepository`,
 `DocumentContentStore`, `DocumentUploadRepository` and `DocumentLifecycleRepository`.
-The `filesystem` module provides immutable local content storage. Neither module
-adds third-party runtime dependencies. The `jpa` module supplies PostgreSQL-backed
+The core uses Guava `Closer` for managed stream cleanup and exception suppression.
+The `filesystem` module provides immutable local content storage and adds no
+further runtime libraries beyond core. The `jpa` module supplies PostgreSQL-backed
 persistence adapters, Flyway migrations and short upload reservation/finalization
 transactions. `autoconfigure` wires these components in Spring Boot 3, `starter`
 provides host dependencies, and `sample-app` is an executable console example.

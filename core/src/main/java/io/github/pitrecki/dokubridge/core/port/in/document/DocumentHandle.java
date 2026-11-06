@@ -1,5 +1,6 @@
 package io.github.pitrecki.dokubridge.core.port.in.document;
 
+import com.google.common.io.Closer;
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
@@ -103,21 +104,15 @@ public final class DocumentHandle {
         return readAndClose(content(versionId), reader);
     }
 
-    // A stream can reuse an exception for read and close; try-with-resources would mask it with self-suppression.
     private static <T> T readAndClose(InputStream input, DocumentContentReader<T> reader) throws IOException {
-        T value;
-        try {
-            value = reader.read(input);
-        } catch (Throwable failure) {
+        try (var closer = Closer.create()) {
+            closer.register(input);
             try {
-                input.close();
-            } catch (Throwable closeFailure) {
-                if (closeFailure != failure) failure.addSuppressed(closeFailure);
+                return reader.read(input);
+            } catch (Throwable failure) {
+                throw closer.rethrow(failure);
             }
-            throw failure;
         }
-        input.close();
-        return value;
     }
 
     public VersionUpload upload(byte[] content) {

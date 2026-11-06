@@ -95,6 +95,9 @@ including on reader or stream failure. Readers can throw checked `IOException`;
 close errors propagate, or are suppressed on an existing reader exception. If a
 stream reuses the same exception for read and close, the original is propagated
 unchanged without attempting self-suppression. A null reader fails before I/O.
+Guava `Closer` provides resource cleanup and exception suppression inside the
+private `DocumentHandle` implementation; Guava types do not appear in public
+signatures. Domain types and outbound ports remain independent of this dependency.
 The helper performs no buffering, adds no transaction or
 audit and makes no state transition. The original caller-owned raw download and
 upload stream contracts remain available. A reader must consume content within
@@ -305,7 +308,7 @@ The `jpa` module contains `JpaBusinessDocumentRepository`,
 `JpaDocumentVersionRepository`, `JpaDocumentAuditRepository`,
 `JpaDocumentUploadRepository` and `JpaDocumentLifecycleRepository`. Its runtime dependencies provide Spring ORM
 transaction boundaries, Hibernate JPA, Jackson JSON encoding, PostgreSQL JDBC
-and Flyway migrations. The core has no new runtime dependencies. Repositories live
+and Flyway migrations. Core's managed content reads use Guava `Closer`. Repositories live
 in `adapter.jpa.document`, `adapter.jpa.version`, `adapter.jpa.upload` and
 `adapter.jpa.audit`, with entities and JSON mapping in each feature's `persistence`
 subpackage. The filesystem adapter lives in `adapter.filesystem.content`.

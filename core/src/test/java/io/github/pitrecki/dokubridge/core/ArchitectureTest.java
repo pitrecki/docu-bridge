@@ -1,11 +1,14 @@
 package io.github.pitrecki.dokubridge.core;
 
+import com.google.common.io.Closer;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import org.junit.jupiter.api.Test;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.type;
 
 class ArchitectureTest {
     private static final JavaClasses CORE = new ClassFileImporter()
@@ -40,9 +43,14 @@ class ArchitectureTest {
     }
 
     @Test
-    void inboundPortsDependOnlyOnDomainAndTheirOwnContracts() {
+    void inboundTypesKeepTheirDependenciesScoped() {
         classes().that().resideInAPackage("..core.port.in..")
+                .and().doNotHaveFullyQualifiedName("io.github.pitrecki.dokubridge.core.port.in.document.DocumentHandle")
                 .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "..core.domain..", "..core.port.in..")
+                .check(CORE);
+        classes().that().haveFullyQualifiedName("io.github.pitrecki.dokubridge.core.port.in.document.DocumentHandle")
+                .should().onlyDependOnClassesThat(resideInAnyPackage("java..", "..core.domain..", "..core.port.in..")
+                        .or(type(Closer.class)))
                 .check(CORE);
     }
 
