@@ -131,6 +131,16 @@ first, including the full library and packaged-sample suite, then verifies this
 consumer against PostgreSQL. Its fluent flow covers upload/replay, content and
 audit reads, owner results, metadata revision checks, archive and deletion.
 
+`scripts/verify-consumer.sh` evaluates the root project's effective version through
+the Maven Help plugin and supplies it as `dokubridge.version` to the separate
+consumer build. The consumer deliberately has no fallback library version. This
+prevents an older artifact in the local Maven cache from passing the check after
+a library version change. Maven settings and repository options passed to the
+helper apply to both version evaluation and consumer verification. The helper
+does not install artifacts; the library's successful `install` must precede it.
+CI also verifies that the consumer rejects an unspecified version even after the
+current library artifacts have been installed in the local repository.
+
 ## Engineering priorities
 
 Correct state transitions and failure handling matter more than adding features. Prefer a small public API, explicit invariants, short transactions, deterministic tests and understandable code. Verify persistence with PostgreSQL, cover edge cases around storage failure and concurrent version creation, and keep docs restricted to decisions that matter to maintainers and consumers.

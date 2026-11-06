@@ -17,5 +17,11 @@ jobs:
           cache: maven
       - name: Build and install library
         run: ./mvnw --batch-mode install
+      - name: Ensure consumer requires an explicit library version
+        run: |
+          if ./mvnw --batch-mode --file integration-tests/starter-consumer/pom.xml validate; then
+            printf '%s\n' 'Consumer unexpectedly accepted an unspecified library version.' >&2
+            exit 1
+          fi
       - name: Verify independent starter consumer
-        run: ./mvnw --batch-mode --file integration-tests/starter-consumer/pom.xml verify
+        run: ./scripts/verify-consumer.sh

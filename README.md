@@ -73,12 +73,17 @@ operations. Run the same checks locally from the repository root:
 
 ```sh
 ./mvnw install
-./mvnw --file integration-tests/starter-consumer/pom.xml verify
+./scripts/verify-consumer.sh
 ```
 
 Use the same local Maven repository for both commands. This consumer check runs
 separately from the normal reactor `verify`; it needs the artifacts installed by
-the first command. Keep its starter version aligned with the library version.
+the first command. The helper reads the root project's effective Maven version
+and supplies it to the independent consumer as `dokubridge.version`. The consumer
+has no default library version, so it cannot silently test a previously cached
+release when the root version changes. The helper accepts Maven options such as
+`-s settings.xml` and `-Dmaven.repo.local=/path/to/repository`; it forwards them to
+both Maven invocations. Version evaluation uses the pinned Maven Help plugin.
 
 ## Library artifacts
 
