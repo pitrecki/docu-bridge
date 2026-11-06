@@ -133,6 +133,26 @@ class UploadReconciliationTest {
     }
 
     @Test
+    void sharedReadAndCloseFailurePreservesTheOriginalErrorAndPendingState() {
+        readFailure = new IOException("Shared storage failure");
+        closeFailure = readFailure;
+        assertThatThrownBy(() -> bridge.reconcileUpload(command)).isSameAs(readFailure);
+        assertThat(readFailure.getSuppressed()).isEmpty();
+        assertThat(uploads.version.state()).isEqualTo(DocumentVersionState.PENDING);
+        assertThat(events).containsExactly("inspect", "open", "close");
+    }
+
+    @Test
+    void distinctCloseFailureIsSuppressedWithoutFinalizingRecovery() {
+        readFailure = new IOException("Read failed");
+        closeFailure = new IOException("Close failed");
+        assertThatThrownBy(() -> bridge.reconcileUpload(command)).isSameAs(readFailure)
+                .satisfies(error -> assertThat(error.getSuppressed()).containsExactly(closeFailure));
+        assertThat(uploads.version.state()).isEqualTo(DocumentVersionState.PENDING);
+        assertThat(events).containsExactly("inspect", "open", "close");
+    }
+
+    @Test
     void missingContentReportedDuringReadIsAnErrorRatherThanASuccessfulMissingProbe() {
         readFailure = new DocumentContentNotFoundException(versionId, null);
         assertThatThrownBy(() -> bridge.reconcileUpload(command)).isSameAs(readFailure);

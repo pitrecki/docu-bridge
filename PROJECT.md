@@ -483,6 +483,8 @@ the original declared checksum recorded in the reservation. Matching bytes becom
 finalization transaction begins. A missing blob leaves the request pending and
 returns a fresh durable snapshot, since an uploader may still be publishing it.
 Other open/read/close errors propagate without requesting a state change.
+Recovery uses Guava `Closer` to finish stream cleanup before finalization and
+preserve the primary read error, including when read and close reuse one exception.
 
 `DocumentUploadRepository.inspectForRecovery` returns a fresh committed snapshot
 and its optional recorded checksum. `completeRecovery` locks/refreshes the version

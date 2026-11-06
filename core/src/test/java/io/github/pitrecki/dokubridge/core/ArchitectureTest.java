@@ -62,10 +62,16 @@ class ArchitectureTest {
     }
 
     @Test
-    void applicationDependsOnlyOnDomainPortsAndJava() {
+    void applicationTypesKeepTheirDependenciesScoped() {
         classes().that().resideInAPackage("..core.application..")
+                .and().doNotHaveFullyQualifiedName("io.github.pitrecki.dokubridge.core.application.upload.DocumentUploads")
                 .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "..core.domain..",
                         "..core.port.in..", "..core.port.out..", "..core.application..")
+                .check(CORE);
+        classes().that().haveFullyQualifiedName("io.github.pitrecki.dokubridge.core.application.upload.DocumentUploads")
+                .should().onlyDependOnClassesThat(resideInAnyPackage("java..", "..core.domain..",
+                                "..core.port.in..", "..core.port.out..", "..core.application..")
+                        .or(type(Closer.class)))
                 .check(CORE);
     }
 }

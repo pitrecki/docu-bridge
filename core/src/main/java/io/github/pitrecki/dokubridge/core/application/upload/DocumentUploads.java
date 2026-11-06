@@ -1,5 +1,6 @@
 package io.github.pitrecki.dokubridge.core.application.upload;
 
+import com.google.common.io.Closer;
 import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.content.exception.ContentChecksumMismatchException;
 import io.github.pitrecki.dokubridge.core.domain.content.exception.DocumentContentNotFoundException;
@@ -48,8 +49,13 @@ public final class DocumentUploads {
             return uploads.inspectForRecovery(command.requestId(), command.versionId()).version();
         }
         var digest = UploadFingerprint.sha256();
-        try (var input = stored) {
-            new DigestInputStream(input, digest).transferTo(OutputStream.nullOutputStream());
+        try (var closer = Closer.create()) {
+            var input = closer.register(stored);
+            try {
+                new DigestInputStream(input, digest).transferTo(OutputStream.nullOutputStream());
+            } catch (Throwable failure) {
+                throw closer.rethrow(failure);
+            }
         }
         var outcome = expected.value().equals(HexFormat.of().formatHex(digest.digest()))
                 ? DocumentVersionState.AVAILABLE : DocumentVersionState.FAILED;

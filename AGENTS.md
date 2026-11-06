@@ -24,7 +24,7 @@ DokuBridge is an embeddable Java library for attaching versioned documents, meta
 - `DocumentBridge` is the public facade; `DefaultDocumentBridge` implements application-level behavior in `core`.
 - Keep the content-first fluent API on the inbound side. Drafts are immutable and delegate to existing facade commands; owner and metadata-revision steps must precede save. Do not add persistence, authorization or automatic retry behavior to fluent helpers.
 - Fluent results expose snapshots through `result()` and document continuations through `and()`. Preserve selected content versions across metadata/archive continuations. Callbacks run after a normally returning save, including replays; preserve original exceptions and existing per-operation transactions without rolling back earlier commits.
-- `DocumentHandle` uses Guava `Closer` privately for managed stream cleanup and exception suppression. Keep Guava out of domain types, outbound ports and public API signatures; ArchUnit permits this specific implementation dependency.
+- `DocumentHandle` and `DocumentUploads` use Guava `Closer` privately for managed reads and recovery stream cleanup. Keep Guava out of domain types, outbound ports and public API signatures; ArchUnit permits these specific implementation dependencies.
 - Persistence is provided through semantic ports and JPA adapters, including `JpaBusinessDocumentRepository`, `JpaDocumentVersionRepository` and `JpaDocumentAuditRepository`.
 - File storage is accessed through `DocumentContentStore`. Do not create a `JpaDocumentBridge` or `TransactionRunner`.
 - Keep persistence and storage concerns inside their adapters. Do not let JPA entities leak into the public API.
