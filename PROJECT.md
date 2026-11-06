@@ -87,6 +87,17 @@ remains available. A handle created from just a document id has no selected vers
 and rejects no-argument content access rather than guessing the latest version.
 Every content read still enforces current visibility and availability.
 
+`DocumentHandle.readContent(reader)` reads the selected upload version, while
+`readContent(versionId, reader)` selects a version explicitly. Both use the existing
+content facade checks and invoke `DocumentContentReader<T>` once after a successful
+open. The stream is borrowed for that call and closed before returning its result,
+including on reader or stream failure. Readers can throw checked `IOException`;
+close errors propagate, or are suppressed on an existing reader exception. A null
+reader fails before I/O. The helper performs no buffering, adds no transaction or
+audit and makes no state transition. The original caller-owned raw download and
+upload stream contracts remain available. A reader must consume content within
+its call and return parsed data rather than retain the borrowed stream.
+
 `saveAndThen(action)` validates a non-null callback before saving, then calls
 `save().andThen(action)`. The callback runs once whenever save returns normally,
 including pending/failed keyed replays; it is skipped if save throws. Checked I/O

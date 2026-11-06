@@ -574,6 +574,43 @@ class FluentDocumentBridgeTest {
     }
 
     @Test
+    void managedReadsUseSelectedOrExplicitVersionsWithoutChangingHistory() throws Exception {
+        var first = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var second = first.and().upload(new byte[]{7}).save();
+        var archived = second.and().archive();
+        byte[] original = first.and().readContent(InputStream::readAllBytes);
+        byte[] latest = archived.and().readContent(InputStream::readAllBytes);
+        var found = bridge.findDocument(first.and().id()).orElseThrow();
+        byte[] explicit = found.and().readContent(first.result().id(), InputStream::readAllBytes);
+        assertThat(original).containsExactly(bytes);
+        assertThat(latest).containsExactly((byte) 7);
+        assertThat(explicit).containsExactly(bytes);
+        assertThat(found.and().versions()).containsExactly(first.result(), second.result());
+        assertThat(found.and().get()).contains(archived.result());
+        assertThat(found.and().audit()).hasSize(5);
+    }
+
+    @Test
+    void readerFailureLeavesTheVersionAvailableAndDeletionSkipsTheReader() throws Exception {
+        var saved = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var found = bridge.findDocument(saved.and().id()).orElseThrow();
+        var failure = new IOException("Parser failed");
+        assertThatThrownBy(() -> found.and().readContent(saved.result().id(), input -> { throw failure; }))
+                .isSameAs(failure);
+        byte[] reread = found.and().readContent(saved.result().id(), InputStream::readAllBytes);
+        assertThat(reread).containsExactly(bytes);
+        assertThat(saved.and().versions()).containsExactly(saved.result());
+        assertThat(saved.and().get().orElseThrow().revision()).isZero();
+        assertThat(saved.and().audit()).hasSize(2);
+        saved.and().delete();
+        var calls = new AtomicInteger();
+        assertThatThrownBy(() -> saved.and().readContent(input -> calls.incrementAndGet()))
+                .isInstanceOf(DocumentNotFoundException.class);
+        assertThat(calls).hasValue(0);
+        assertThat(audits.findByDocument(saved.and().id())).hasSize(3);
+    }
+
+    @Test
     void recoveryCanBeInvokedWithoutConstructingACommand() throws Exception {
         UUID key = UUID.randomUUID();
         var pending = uploads.reserveAttach(key, "a".repeat(64), new DocumentOwnerRef("Invoice", "42"), Map.of(),

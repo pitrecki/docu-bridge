@@ -5,6 +5,7 @@ import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
@@ -42,12 +43,13 @@ public class SampleApplication {
         byte[] revised = "second revision".getBytes(StandardCharsets.UTF_8);
         var next = document.upload(revised).save();
         var second = next.result();
-        try (var stream = next.and().content()) {
-            if (!Arrays.equals(stream.readAllBytes(), revised)) throw new IOException("Downloaded content differs");
-        }
+        byte[] downloaded = next.and().readContent(InputStream::readAllBytes);
+        if (!Arrays.equals(downloaded, revised)) throw new IOException("Downloaded content differs");
         var found = bridge.documentsForOwner("Invoice", "sample-42").stream()
                 .filter(candidate -> candidate.result().id().equals(first.documentId()))
                 .findFirst().orElseThrow(() -> new IllegalStateException("Owner lookup omitted the document"));
+        byte[] original = found.and().readContent(first.id(), InputStream::readAllBytes);
+        if (!Arrays.equals(original, initial)) throw new IOException("Original content differs");
         if (first.state() != DocumentVersionState.AVAILABLE || second.number() != 2
                 || document.get().isEmpty()) {
             throw new IllegalStateException("Document workflow failed");
@@ -76,6 +78,6 @@ public class SampleApplication {
                 || bridge.documentsForOwner("Invoice", "sample-42").stream().anyMatch(candidate -> candidate.result().id().equals(first.documentId()))) {
             throw new IllegalStateException("Deleted document is still visible");
         }
-        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with document lookup, owner lookup, version history 1 and 2, audited events, metadata, archive and logical deletion");
+        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with managed content reads, document lookup, owner lookup, version history 1 and 2, audited events, metadata, archive and logical deletion");
     }
 }

@@ -195,7 +195,7 @@ The facade exposes `attach`, `addVersion`, `updateMetadata`, `archive`, `delete`
 Active and archived documents are readable; deleted documents appear absent. Content is available
 only for an `AVAILABLE` version belonging to the requested document, regardless
 of whether bytes already exist in storage. The host application authorizes callers
-and closes content streams. See [PROJECT.md](PROJECT.md#read-facade) for errors,
+and closes raw content streams. See [PROJECT.md](PROJECT.md#read-facade) for errors,
 metadata types and consistency limits.
 
 The JPA module also implements `DocumentUploadRepository` for atomic request
@@ -318,6 +318,37 @@ Fluent operations call the existing command/query facade. Visibility, authorizat
 by the host, version numbering, revision conflicts, audit and transaction behavior
 remain the same. Existing command-based calls and custom facade implementations
 remain supported; no additional Spring bean or storage adapter is needed.
+
+### Reading content with automatic close
+
+`readContent(reader)` opens the version selected by an upload result, invokes the
+reader once and closes the stream before returning its value. For a document
+obtained by id or owner, pass the version explicitly:
+
+```java
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+
+byte[] bytes = saved.and().readContent(InputStream::readAllBytes);
+
+var found = bridge.findDocument(documentId).orElseThrow();
+String text = found.and().readContent(versionId,
+    input -> new String(input.readAllBytes(), StandardCharsets.UTF_8));
+```
+
+`DocumentContentReader<T>` accepts a checked `IOException` and can process content
+incrementally; the helper adds no buffering or transaction. The borrowed stream
+is valid during the reader call and is closed afterward, including on reader or
+stream errors. Return parsed data rather than retaining or returning the stream.
+Reader exceptions propagate; a simultaneous close failure is suppressed on the
+original exception. If only close fails, that error propagates instead of returning
+the reader's value. A null reader is rejected before I/O.
+
+These reads enforce the same visibility, document/version association and
+`AVAILABLE` checks as `content()`. An open failure skips the reader. Reading adds
+no state change or audit. A context with no selected version requires the explicit
+version overload. `content()` and `content(versionId)` continue to return raw
+streams that the caller closes.
 
 ### Document by id
 

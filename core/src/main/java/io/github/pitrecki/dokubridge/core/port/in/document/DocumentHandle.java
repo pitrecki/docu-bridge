@@ -72,6 +72,41 @@ public final class DocumentHandle {
         return bridge.getContent(documentId, versionId);
     }
 
+    /**
+     * Reads the selected upload version and closes its stream before returning the value.
+     * For example, {@code readContent(InputStream::readAllBytes)} returns its bytes.
+     * The reader runs once after content opens successfully, using the same visibility
+     * and availability checks as {@link #content()}. It must use the stream within its call.
+     *
+     * @throws IOException if opening, reading or closing content fails; a close failure
+     *         is suppressed when the reader already threw an exception
+     * @throws IllegalStateException if this context has no selected version
+     * @throws NullPointerException if the reader is null, before performing I/O
+     */
+    public <T> T readContent(DocumentContentReader<T> reader) throws IOException {
+        Objects.requireNonNull(reader, "Content reader must not be null");
+        try (var input = content()) {
+            return reader.read(input);
+        }
+    }
+
+    /**
+     * Reads an explicit version and closes its stream before returning the value.
+     * Uses the same visibility and availability checks as {@link #content(UUID)}.
+     * The reader runs once after a successful open and must use the stream within its call.
+     * No buffering or transaction is added around the reader.
+     *
+     * @throws IOException if opening, reading or closing content fails; a close failure
+     *         is suppressed when the reader already threw an exception
+     * @throws NullPointerException if the reader is null, before performing I/O
+     */
+    public <T> T readContent(UUID versionId, DocumentContentReader<T> reader) throws IOException {
+        Objects.requireNonNull(reader, "Content reader must not be null");
+        try (var input = content(versionId)) {
+            return reader.read(input);
+        }
+    }
+
     public VersionUpload upload(byte[] content) {
         return VersionUpload.fromBytes(bridge, documentId, content);
     }

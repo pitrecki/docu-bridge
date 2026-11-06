@@ -29,6 +29,9 @@ class FluentStagesCompilationTest {
                         .metadata("category", "invoice").requestId(id).save();
                 var version = saved.result();
                 var document = saved.and();
+                byte[] uploadedContent = document.readContent(java.io.InputStream::readAllBytes);
+                String decodedContent = bridge.document(id).readContent(version.id(),
+                        input -> new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
                 Map<String, String> metadata = Map.of("category", "invoice");
                 document.upload(bytes).save().and()
                         .replaceMetadata(metadata).atRevision(0).save().and()

@@ -4,6 +4,7 @@ import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditAction;
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Map;
@@ -42,9 +43,8 @@ class InstalledStarterTest {
             var upload = bridge.upload(bytes).toOwner("Invoice", "external-42")
                     .metadata("origin", "external").requestId(UUID.randomUUID());
             var saved = upload.saveAndThen(document -> {
-                try (var input = document.content()) {
-                    assertThat(input.readAllBytes()).containsExactly(bytes);
-                }
+                byte[] downloaded = document.readContent(InputStream::readAllBytes);
+                assertThat(downloaded).containsExactly(bytes);
             });
             assertThat(saved.result().state()).isEqualTo(DocumentVersionState.AVAILABLE);
             assertThat(upload.save().result()).isEqualTo(saved.result());
@@ -60,6 +60,8 @@ class InstalledStarterTest {
             assertThat(updated.and().get().orElseThrow().metadata()).containsEntry("origin", "fluent");
             var loaded = bridge.findDocument(saved.result().documentId()).orElseThrow();
             assertThat(loaded.result()).isEqualTo(updated.result());
+            byte[] downloaded = loaded.and().readContent(saved.result().id(), InputStream::readAllBytes);
+            assertThat(downloaded).containsExactly(bytes);
             loaded.and().archive().and().delete();
             assertThat(saved.and().get()).isEmpty();
             assertThat(bridge.findDocument(saved.result().documentId())).isEmpty();
