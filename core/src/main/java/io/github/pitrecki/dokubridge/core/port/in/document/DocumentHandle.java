@@ -78,16 +78,14 @@ public final class DocumentHandle {
      * The reader runs once after content opens successfully, using the same visibility
      * and availability checks as {@link #content()}. It must use the stream within its call.
      *
-     * @throws IOException if opening, reading or closing content fails; a close failure
+     * @throws IOException if opening, reading or closing content fails; a distinct close failure
      *         is suppressed when the reader already threw an exception
      * @throws IllegalStateException if this context has no selected version
      * @throws NullPointerException if the reader is null, before performing I/O
      */
     public <T> T readContent(DocumentContentReader<T> reader) throws IOException {
         Objects.requireNonNull(reader, "Content reader must not be null");
-        try (var input = content()) {
-            return reader.read(input);
-        }
+        return readAndClose(content(), reader);
     }
 
     /**
@@ -96,15 +94,30 @@ public final class DocumentHandle {
      * The reader runs once after a successful open and must use the stream within its call.
      * No buffering or transaction is added around the reader.
      *
-     * @throws IOException if opening, reading or closing content fails; a close failure
+     * @throws IOException if opening, reading or closing content fails; a distinct close failure
      *         is suppressed when the reader already threw an exception
      * @throws NullPointerException if the reader is null, before performing I/O
      */
     public <T> T readContent(UUID versionId, DocumentContentReader<T> reader) throws IOException {
         Objects.requireNonNull(reader, "Content reader must not be null");
-        try (var input = content(versionId)) {
-            return reader.read(input);
+        return readAndClose(content(versionId), reader);
+    }
+
+    // A stream can reuse an exception for read and close; try-with-resources would mask it with self-suppression.
+    private static <T> T readAndClose(InputStream input, DocumentContentReader<T> reader) throws IOException {
+        T value;
+        try {
+            value = reader.read(input);
+        } catch (Throwable failure) {
+            try {
+                input.close();
+            } catch (Throwable closeFailure) {
+                if (closeFailure != failure) failure.addSuppressed(closeFailure);
+            }
+            throw failure;
         }
+        input.close();
+        return value;
     }
 
     public VersionUpload upload(byte[] content) {

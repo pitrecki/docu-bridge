@@ -90,6 +90,29 @@ class ManagedContentReadTest {
         assertThat(stream.closes).isEqualTo(1);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void sharedReadAndCloseFailureIsPreservedWithoutSelfSuppression(boolean selected) {
+        var failure = new IOException("Shared stream failure");
+        stream.readFailure = failure;
+        stream.closeFailure = failure;
+        assertThatThrownBy(() -> {
+            if (selected) selected().readContent(InputStream::readAllBytes);
+            else bridge.document(documentId).readContent(versionId, InputStream::readAllBytes);
+        }).isSameAs(failure);
+        assertThat(failure.getSuppressed()).isEmpty();
+        assertThat(stream.closes).isEqualTo(1);
+    }
+
+    @Test
+    void readerErrorIsPreservedAndStillClosesTheStream() {
+        var failure = new AssertionError("Reader failed");
+        stream.closeFailure = new IOException("Close failed");
+        assertThatThrownBy(() -> selected().readContent(input -> { throw failure; })).isSameAs(failure)
+                .satisfies(error -> assertThat(error.getSuppressed()).containsExactly(stream.closeFailure));
+        assertThat(stream.closes).isEqualTo(1);
+    }
+
     @Test
     void runtimeReaderFailureAlsoClosesTheStreamAndPropagatesUnchanged() {
         var failure = new IllegalStateException("Parser failed");
