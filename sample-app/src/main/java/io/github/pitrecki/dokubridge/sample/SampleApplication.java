@@ -30,13 +30,19 @@ public class SampleApplication {
                 .toOwner("Invoice", "sample-42")
                 .metadata("category", "invoice")
                 .requestId(UUID.randomUUID());
-        var first = upload.save();
-        var replay = upload.save();
+        var saved = upload.saveAndThen(document -> {
+            if (document.versions().size() != 1 || document.audit().size() != 2) {
+                throw new IllegalStateException("Upload callback differs");
+            }
+        });
+        var first = saved.result();
+        var replay = upload.save().result();
         if (!first.equals(replay)) throw new IllegalStateException("Idempotent replay returned another version");
-        var document = bridge.document(first.documentId());
+        var document = saved.and();
         byte[] revised = "second revision".getBytes(StandardCharsets.UTF_8);
-        var second = document.upload(revised).save();
-        try (var stream = document.content(second.id())) {
+        var next = document.upload(revised).save();
+        var second = next.result();
+        try (var stream = next.and().content()) {
             if (!Arrays.equals(stream.readAllBytes(), revised)) throw new IOException("Downloaded content differs");
         }
         if (first.state() != DocumentVersionState.AVAILABLE || second.number() != 2
@@ -51,8 +57,8 @@ public class SampleApplication {
         var updated = document.replaceMetadata(Map.of("category", "revised"))
                 .atRevision(current.revision())
                 .save();
-        var archived = document.archive();
-        if (archived.revision() != updated.revision() + 1) throw new IllegalStateException("Archive revision differs");
+        var archived = updated.and().archive();
+        if (archived.result().revision() != updated.result().revision() + 1) throw new IllegalStateException("Archive revision differs");
         if (!document.versions().equals(history)) throw new IllegalStateException("Archived history differs");
         var actions = document.audit().stream().map(DocumentAuditEntry::action).toList();
         if (!actions.equals(List.of(DocumentAuditAction.DOCUMENT_ATTACHED, DocumentAuditAction.UPLOAD_SUCCEEDED,
@@ -66,6 +72,6 @@ public class SampleApplication {
                 || bridge.findByOwner("Invoice", "sample-42").stream().anyMatch(candidate -> candidate.id().equals(first.documentId()))) {
             throw new IllegalStateException("Deleted document is still visible");
         }
-        System.out.println("Verified document " + first.documentId() + " through fluent API with version history 1 and 2, audited events, metadata, archive and logical deletion");
+        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with version history 1 and 2, audited events, metadata, archive and logical deletion");
     }
 }

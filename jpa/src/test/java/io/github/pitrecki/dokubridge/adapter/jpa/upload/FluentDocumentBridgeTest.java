@@ -96,8 +96,8 @@ class FluentDocumentBridgeTest {
     void eachUnkeyedSaveCreatesANewAttachmentWithItsOwnChecksumAndRequest() throws Exception {
         var draft = bridge.upload(bytes).toOwner("Invoice", "42");
         assertThat(bridge.findByOwner("Invoice", "42")).isEmpty();
-        var first = draft.save();
-        var second = draft.save();
+        var first = draft.save().result();
+        var second = draft.save().result();
         assertThat(first.documentId()).isNotEqualTo(second.documentId());
         assertThat(first.state()).isEqualTo(DocumentVersionState.AVAILABLE);
         assertThat(first.number()).isEqualTo(1);
@@ -117,15 +117,15 @@ class FluentDocumentBridgeTest {
         mutable[0] = 7;
         nested.clear();
         metadata.clear();
-        var first = original.save();
-        var second = branch.save();
+        var first = original.save().result();
+        var second = branch.save().result();
         assertThat(download(first)).containsExactly((byte) 42);
         assertThat(download(second)).containsExactly((byte) 42);
         assertThat(bridge.document(first.documentId()).get().orElseThrow().metadata())
                 .containsOnlyKeys("nested").containsEntry("nested", List.of("original"));
         assertThat(bridge.document(second.documentId()).get().orElseThrow().metadata())
                 .containsEntry("category", "invoice").containsEntry("nullable", null);
-        var replaced = branch.metadata(Map.of("only", "replacement")).save();
+        var replaced = branch.metadata(Map.of("only", "replacement")).save().result();
         assertThat(bridge.document(replaced.documentId()).get().orElseThrow().metadata()).containsOnlyKeys("only");
     }
 
@@ -134,26 +134,26 @@ class FluentDocumentBridgeTest {
         UUID key = UUID.randomUUID();
         var owner = new DocumentOwnerRef("Invoice", "42");
         var draft = bridge.upload(bytes).toOwner(owner).metadata("kind", "invoice").requestId(key);
-        var first = draft.save();
-        assertThat(draft.save()).isEqualTo(first);
+        var first = draft.save().result();
+        assertThat(draft.save().result()).isEqualTo(first);
         assertThat(bridge.attach(new AttachDocument(key, owner, Map.of("kind", "invoice"), ContentSha256.of(bytes),
                 new ByteArrayInputStream(bytes)))).isEqualTo(first);
-        assertThatThrownBy(() -> draft.metadata("kind", "changed").save()).isInstanceOf(UploadRequestConflictException.class);
+        assertThatThrownBy(() -> draft.metadata("kind", "changed").save().result()).isInstanceOf(UploadRequestConflictException.class);
         assertThat(bridge.document(first.documentId()).versions()).containsExactly(first);
         assertThat(bridge.document(first.documentId()).audit()).hasSize(2);
     }
 
     @Test
     void versionDraftsDistinguishExplicitRetriesFromNewUnkeyedSaves() throws Exception {
-        var first = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var first = bridge.upload(bytes).toOwner("Invoice", "42").save().result();
         var document = bridge.document(first.documentId());
         UUID key = UUID.randomUUID();
         var explicit = document.upload(new byte[]{7}).requestId(key);
-        var second = explicit.save();
-        assertThat(explicit.save()).isEqualTo(second);
+        var second = explicit.save().result();
+        assertThat(explicit.save().result()).isEqualTo(second);
         var unkeyed = document.upload(new byte[]{8});
-        var third = unkeyed.save();
-        var fourth = unkeyed.save();
+        var third = unkeyed.save().result();
+        var fourth = unkeyed.save().result();
         assertThat(document.versions()).containsExactly(first, second, third, fourth);
         assertThat(request(second)).isEqualTo(key);
         assertThat(request(third)).isNotEqualTo(request(fourth));
@@ -174,10 +174,10 @@ class FluentDocumentBridgeTest {
         var draft = bridge.upload(source, ContentSha256.of(bytes).value()).toOwner("Invoice", "42").requestId(UUID.randomUUID());
         assertThat(reads).hasValue(0);
         assertThat(closed).isFalse();
-        var first = draft.save();
+        var first = draft.save().result();
         int consumed = reads.get();
         assertThat(consumed).isPositive();
-        assertThat(draft.save()).isEqualTo(first);
+        assertThat(draft.save().result()).isEqualTo(first);
         assertThat(reads).hasValue(consumed);
         assertThat(closed).isFalse();
         source.close();
@@ -186,7 +186,7 @@ class FluentDocumentBridgeTest {
 
     @Test
     void versionStreamFailurePreservesItsCauseAndCallerOwnershipAndFailedReplayDoesNotReadAgain() throws Exception {
-        var first = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var first = bridge.upload(bytes).toOwner("Invoice", "42").save().result();
         var closed = new AtomicBoolean();
         var reads = new AtomicInteger();
         var failure = new IOException("Interrupted input");
@@ -197,7 +197,7 @@ class FluentDocumentBridgeTest {
         var draft = bridge.document(first.documentId()).upload(source, ContentSha256.of(bytes)).requestId(UUID.randomUUID());
         assertThatThrownBy(draft::save).isSameAs(failure);
         int attempted = reads.get();
-        var failed = draft.save();
+        var failed = draft.save().result();
         assertThat(failed.state()).isEqualTo(DocumentVersionState.FAILED);
         assertThat(reads).hasValue(attempted);
         assertThat(closed).isFalse();
@@ -207,14 +207,14 @@ class FluentDocumentBridgeTest {
 
     @Test
     void emptyByteContentIsAvailableAndDownloadable() throws Exception {
-        var version = bridge.upload(new byte[0]).toOwner("Invoice", "42").save();
+        var version = bridge.upload(new byte[0]).toOwner("Invoice", "42").save().result();
         assertThat(version.state()).isEqualTo(DocumentVersionState.AVAILABLE);
         assertThat(download(version)).isEmpty();
     }
 
     @Test
     void metadataReplacementKeepsItsSnapshotAndRequiresTheObservedRevision() throws Exception {
-        var first = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var first = bridge.upload(bytes).toOwner("Invoice", "42").save().result();
         var document = bridge.document(first.documentId());
         var nested = new ArrayList<>(List.of("original"));
         var metadata = new LinkedHashMap<String, Object>();
@@ -225,23 +225,23 @@ class FluentDocumentBridgeTest {
         var ready = replacement.atRevision(0);
         assertThat(document.get().orElseThrow().revision()).isZero();
         assertThat(document.audit()).hasSize(2);
-        assertThat(ready.save().metadata()).containsEntry("nested", List.of("original"));
+        assertThat(ready.save().result().metadata()).containsEntry("nested", List.of("original"));
         assertThatThrownBy(ready::save).isInstanceOf(DocumentRevisionConflictException.class);
         assertThat(document.audit()).hasSize(3);
-        assertThat(replacement.atRevision(1).save().revision()).isEqualTo(2);
-        assertThat(document.replaceMetadata(Map.of()).atRevision(2).save().metadata()).isEmpty();
+        assertThat(replacement.atRevision(1).save().result().revision()).isEqualTo(2);
+        assertThat(document.replaceMetadata(Map.of()).atRevision(2).save().result().metadata()).isEmpty();
         assertThat(document.versions()).containsExactly(first);
     }
 
     @Test
     void documentHandleUsesCurrentVisibilityAndDelegatesLifecycleWithoutCachingState() throws Exception {
         var original = bridge.upload(bytes).toOwner("Invoice", "42").requestId(UUID.randomUUID());
-        var first = original.save();
+        var first = original.save().result();
         var document = bridge.document(first.documentId());
-        var archived = document.archive();
-        assertThat(document.archive()).isEqualTo(archived);
+        var archived = document.archive().result();
+        assertThat(document.archive().result()).isEqualTo(archived);
         assertThat(document.get().orElseThrow().state()).isEqualTo(BusinessDocumentState.ARCHIVED);
-        var second = document.upload(new byte[]{7}).save();
+        var second = document.upload(new byte[]{7}).save().result();
         assertThat(document.versions()).containsExactly(first, second);
         document.delete();
         document.delete();
@@ -249,9 +249,114 @@ class FluentDocumentBridgeTest {
         assertThatThrownBy(document::versions).isInstanceOf(DocumentNotFoundException.class);
         assertThatThrownBy(document::audit).isInstanceOf(DocumentNotFoundException.class);
         assertThatThrownBy(() -> document.content(first.id())).isInstanceOf(DocumentNotFoundException.class);
-        assertThatThrownBy(() -> document.upload(bytes).save()).isInstanceOf(DocumentNotFoundException.class);
-        assertThat(original.save()).isEqualTo(first);
+        assertThatThrownBy(() -> document.upload(bytes).save().result()).isInstanceOf(DocumentNotFoundException.class);
+        assertThat(original.save().result()).isEqualTo(first);
         assertThat(audits.findByDocument(first.documentId())).hasSize(6);
+    }
+
+    @Test
+    void chainKeepsTheDocumentAndSelectedContentWithoutRepeatingUploads() throws Exception {
+        var saved = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var archived = saved.and().archive();
+        assertThat(archived.result().state()).isEqualTo(BusinessDocumentState.ARCHIVED);
+        assertThat(archived.and().id()).isEqualTo(saved.result().documentId());
+        assertThat(archived.and().versions()).containsExactly(saved.result());
+        try (var input = archived.and().content()) {
+            assertThat(input.readAllBytes()).containsExactly(bytes);
+        }
+        var updated = archived.and().replaceMetadata(Map.of("category", "changed"))
+                .atRevision(1).save();
+        assertThat(updated.result().revision()).isEqualTo(2);
+        try (var input = updated.and().content()) {
+            assertThat(input.readAllBytes()).containsExactly(bytes);
+        }
+        var next = updated.and().upload(new byte[]{7}).save();
+        try (var input = next.and().content()) {
+            assertThat(input.readAllBytes()).containsExactly((byte) 7);
+        }
+        assertThat(saved.and().versions()).hasSize(2);
+        assertThat(next.and().audit()).hasSize(6);
+        assertThat(saved.result().number()).isEqualTo(1);
+        assertThat(next.result().number()).isEqualTo(2);
+    }
+
+    @Test
+    void callbackReceivesTheSameDocumentAndSupportsCheckedIo() throws Exception {
+        var calls = new AtomicInteger();
+        var saved = bridge.upload(bytes).toOwner("Invoice", "42").saveAndThen(document -> {
+            calls.incrementAndGet();
+            try (var input = document.content()) {
+                assertThat(input.readAllBytes()).containsExactly(bytes);
+            }
+            document.replaceMetadata(Map.of("callback", true)).atRevision(0)
+                    .saveAndThen(updated -> updated.archive());
+        });
+        assertThat(calls).hasValue(1);
+        assertThat(saved.result().state()).isEqualTo(DocumentVersionState.AVAILABLE);
+        assertThat(saved.and().get().orElseThrow().revision()).isEqualTo(2);
+        assertThat(saved.and().get().orElseThrow().state()).isEqualTo(BusinessDocumentState.ARCHIVED);
+        assertThat(saved.and().versions()).containsExactly(saved.result());
+        assertThat(saved.and().audit()).hasSize(4);
+    }
+
+    @Test
+    void callbackFailurePreservesItsCauseAndEarlierCommittedOperations() throws Exception {
+        var failure = new IOException("Follow-up failed");
+        var draft = bridge.upload(bytes).toOwner("Invoice", "42").requestId(UUID.randomUUID());
+        assertThatThrownBy(() -> draft.saveAndThen(document -> {
+            document.replaceMetadata(Map.of("committed", true)).atRevision(0).save();
+            throw failure;
+        })).isSameAs(failure);
+        var replay = draft.save();
+        assertThat(replay.result().state()).isEqualTo(DocumentVersionState.AVAILABLE);
+        assertThat(replay.and().get().orElseThrow().metadata()).containsEntry("committed", true);
+        assertThat(replay.and().get().orElseThrow().revision()).isEqualTo(1);
+        assertThat(replay.and().audit()).hasSize(3);
+    }
+
+    @Test
+    void uploadFailureSkipsCallbackButARegularFailedReplayStillInvokesIt() throws Exception {
+        var failure = new IOException("Read failed");
+        var calls = new AtomicInteger();
+        var draft = bridge.upload(new InputStream() {
+            public int read() throws IOException { throw failure; }
+        }, ContentSha256.of(bytes)).toOwner("Invoice", "42").requestId(UUID.randomUUID());
+        assertThatThrownBy(() -> draft.saveAndThen(document -> calls.incrementAndGet())).isSameAs(failure);
+        assertThat(calls).hasValue(0);
+        var replay = draft.saveAndThen(document -> {
+            calls.incrementAndGet();
+            assertThat(document.versions().getFirst().state()).isEqualTo(DocumentVersionState.FAILED);
+        });
+        assertThat(replay.result().state()).isEqualTo(DocumentVersionState.FAILED);
+        assertThat(calls).hasValue(1);
+        assertThat(replay.and().audit()).hasSize(2);
+    }
+
+    @Test
+    void keyedReplaysRunTheirCallbacksAgainWithoutDuplicatingTheUpload() throws Exception {
+        var calls = new AtomicInteger();
+        var draft = bridge.upload(bytes).toOwner("Invoice", "42").requestId(UUID.randomUUID());
+        var first = draft.saveAndThen(document -> { calls.incrementAndGet(); document.archive(); });
+        var replay = draft.saveAndThen(document -> { calls.incrementAndGet(); document.archive(); });
+        assertThat(replay.result()).isEqualTo(first.result());
+        assertThat(calls).hasValue(2);
+        assertThat(replay.and().versions()).hasSize(1);
+        assertThat(replay.and().audit()).hasSize(3);
+        assertThat(replay.and().get().orElseThrow().revision()).isEqualTo(1);
+    }
+
+    @Test
+    void metadataCallbackFailureDoesNotUndoReplacementAndStaleRetriesDoNotInvokeIt() throws Exception {
+        var saved = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var ready = saved.and().replaceMetadata(Map.of("committed", true)).atRevision(0);
+        var calls = new AtomicInteger();
+        var failure = new IOException("After metadata");
+        assertThatThrownBy(() -> ready.saveAndThen(document -> { calls.incrementAndGet(); throw failure; })).isSameAs(failure);
+        assertThat(saved.and().get().orElseThrow().revision()).isEqualTo(1);
+        assertThatThrownBy(() -> ready.saveAndThen(document -> calls.incrementAndGet()))
+                .isInstanceOf(DocumentRevisionConflictException.class);
+        assertThat(calls).hasValue(1);
+        assertThat(saved.and().audit()).hasSize(3);
     }
 
     @Test

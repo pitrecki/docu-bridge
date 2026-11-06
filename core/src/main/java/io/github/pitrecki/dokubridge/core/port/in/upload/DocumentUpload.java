@@ -5,6 +5,8 @@ import io.github.pitrecki.dokubridge.core.domain.document.DocumentMetadata;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.port.in.DocumentBridge;
+import io.github.pitrecki.dokubridge.core.port.in.document.DocumentAction;
+import io.github.pitrecki.dokubridge.core.port.in.document.DocumentResult;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.LinkedHashMap;
@@ -61,11 +63,17 @@ public final class DocumentUpload {
     }
 
     /** Each call uses a new key unless requestId was supplied; caller-owned streams remain open. */
-    public DocumentVersion save() throws IOException {
+    public DocumentResult<DocumentVersion> save() throws IOException {
         UUID key = requestId == null ? UUID.randomUUID() : requestId;
         try (var input = content.open()) {
-            return bridge.attach(new AttachDocument(key, owner, metadata, content.checksum(), input.stream()));
+            return DocumentResult.uploaded(bridge, bridge.attach(new AttachDocument(key, owner, metadata, content.checksum(), input.stream())));
         }
+    }
+
+    /** Executes save before the callback; callback failure does not roll back the completed upload. */
+    public DocumentResult<DocumentVersion> saveAndThen(DocumentAction action) throws IOException {
+        Objects.requireNonNull(action, "Document action must not be null");
+        return save().andThen(action);
     }
 
     private record Unassigned(DocumentBridge bridge, UploadContent content) implements OwnerStep {

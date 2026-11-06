@@ -18,10 +18,33 @@ import java.util.UUID;
 public final class DocumentHandle {
     private final DocumentBridge bridge;
     private final UUID documentId;
+    private final UUID contentVersionId;
 
     public DocumentHandle(DocumentBridge bridge, UUID documentId) {
+        this(bridge, documentId, null);
+    }
+
+    private DocumentHandle(DocumentBridge bridge, UUID documentId, UUID contentVersionId) {
         this.bridge = Objects.requireNonNull(bridge);
         this.documentId = Objects.requireNonNull(documentId, "Document id must not be null");
+        this.contentVersionId = contentVersionId;
+    }
+
+    static DocumentHandle forVersion(DocumentBridge bridge, DocumentVersion version) {
+        Objects.requireNonNull(version, "Version must not be null");
+        return new DocumentHandle(bridge, version.documentId(), version.id());
+    }
+
+    public UUID id() {
+        return documentId;
+    }
+
+    /** Opens the version selected by an upload result; the caller closes the returned stream. */
+    public InputStream content() throws IOException {
+        if (contentVersionId == null) {
+            throw new IllegalStateException("No version selected; use an upload continuation or content(versionId)");
+        }
+        return content(contentVersionId);
     }
 
     public Optional<BusinessDocument> get() {
@@ -54,11 +77,11 @@ public final class DocumentHandle {
     }
 
     public MetadataReplacement.RevisionStep replaceMetadata(Map<String, ?> metadata) {
-        return MetadataReplacement.forDocument(bridge, documentId, metadata);
+        return MetadataReplacement.forDocument(bridge, documentId, metadata, this);
     }
 
-    public BusinessDocument archive() {
-        return bridge.archive(new Archive(documentId));
+    public DocumentResult<BusinessDocument> archive() {
+        return DocumentResult.changed(this, bridge.archive(new Archive(documentId)));
     }
 
     public void delete() {

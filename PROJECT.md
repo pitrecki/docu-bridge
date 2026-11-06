@@ -20,8 +20,11 @@ The main model consists of `BusinessDocument`, `DocumentVersion`, `DocumentOwner
 
 ## Fluent API
 
-The primary usage style is `bridge.upload(bytes).toOwner(type, id).save()` and
-`bridge.document(id)`. Attachment drafts require an owner before save is exposed;
+The primary usage styles are `bridge.upload(bytes).toOwner(type, id).save().and()`
+and `bridge.upload(bytes).toOwner(type, id).saveAndThen(document -> ...)`.
+Each uploads one content version and continues on its document without extracting
+an id. `bridge.document(id)` remains available for ids obtained elsewhere.
+Attachment drafts require an owner before save is exposed;
 metadata replacement requires `replaceMetadata(map).atRevision(revision).save()`.
 These requirements are enforced by the returned step types, including compilation
 checks against the core alone. Fluent types live in `core.port.in.upload` and
@@ -47,6 +50,28 @@ Configuring a draft or binding a document id performs no repository/storage I/O.
 archive/delete calls execute their named operations. Document contexts cache no
 state. Fluent entry points add no new transaction, persistence, authorization or
 recovery policy. Existing commands and facade implementations remain supported.
+
+Fluent saves return `DocumentResult<T>`; `result()` exposes the immutable operation
+snapshot and `and()` exposes its bound `DocumentHandle` without executing I/O.
+Fluent archive returns the same result wrapper. Command-based facade methods keep
+their original domain return types; existing fluent clients obtain those snapshots
+with `save().result()` or `archive().result()`.
+
+An upload continuation selects its resulting version for no-argument `content()`.
+Metadata and archive continuations preserve that selection; another upload selects
+its own version without changing earlier handles. Explicit `content(versionId)`
+remains available. A handle created from just a document id has no selected version
+and rejects no-argument content access rather than guessing the latest version.
+Every content read still enforces current visibility and availability.
+
+`saveAndThen(action)` validates a non-null callback before saving, then calls
+`save().andThen(action)`. The callback runs once whenever save returns normally,
+including pending/failed keyed replays; it is skipped if save throws. Checked I/O
+and runtime failures propagate unchanged. Already committed operations are retained,
+and callback failure triggers no compensation or automatic retry. Each operation
+uses its existing transaction boundary. The returned result is the original
+operation snapshot even if the callback changes the document. Replaying an upload
+also repeats its callback; request idempotency covers the upload alone.
 
 ## Lifecycle and consistency
 

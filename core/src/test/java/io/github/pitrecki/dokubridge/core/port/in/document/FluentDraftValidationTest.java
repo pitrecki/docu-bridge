@@ -4,6 +4,7 @@ import io.github.pitrecki.dokubridge.core.application.DefaultDocumentBridge;
 import io.github.pitrecki.dokubridge.core.domain.content.ContentSha256;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
+import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion;
 import io.github.pitrecki.dokubridge.core.port.out.content.DocumentContentStore;
 import io.github.pitrecki.dokubridge.core.port.out.document.BusinessDocumentRepository;
 import java.io.InputStream;
@@ -37,6 +38,27 @@ class FluentDraftValidationTest {
         document.upload(new byte[]{42}).requestId(id);
         document.upload(untouched, new ContentSha256("a".repeat(64))).requestId(id);
         document.replaceMetadata(Map.of("valid", true)).atRevision(0);
+    }
+
+    @Test
+    void resultContinuationsAndCallbacksKeepTheOriginalSnapshotWithoutLoadingState() throws Exception {
+        var version = DocumentVersion.pending(UUID.randomUUID(), id, 1);
+        var saved = DocumentResult.uploaded(bridge, version);
+        assertThat(saved.result()).isSameAs(version);
+        assertThat(saved.and().id()).isEqualTo(id);
+        assertThat(saved.andThen(document -> assertThat(document.id()).isEqualTo(id))).isSameAs(saved);
+        var failure = new IllegalStateException("Callback failed");
+        assertThatThrownBy(() -> saved.andThen(document -> { throw failure; })).isSameAs(failure);
+        assertThat(saved.result()).isSameAs(version);
+    }
+
+    @Test
+    void missingCallbacksAndUnselectedContentAreRejectedBeforeAnyOperation() {
+        var draft = bridge.upload(new byte[]{42}).toOwner("Invoice", "42");
+        assertThatNullPointerException().isThrownBy(() -> draft.saveAndThen(null));
+        assertThatNullPointerException().isThrownBy(() -> bridge.document(id).upload(new byte[0]).saveAndThen(null));
+        assertThatNullPointerException().isThrownBy(() -> bridge.document(id).replaceMetadata(Map.of()).atRevision(0).saveAndThen(null));
+        assertThatIllegalStateException().isThrownBy(() -> bridge.document(id).content());
     }
 
     @Test

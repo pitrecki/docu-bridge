@@ -4,17 +4,23 @@ Embeddable document versioning for Java applications. See [PROJECT.md](PROJECT.m
 for scope and [AGENTS.md](AGENTS.md) for engineering rules.
 
 ```java
-var version = bridge.upload(bytes)
+bridge.upload(bytes)
     .toOwner("Invoice", "42")
     .metadata("category", "invoice")
-    .save();
-
-var document = bridge.document(version.documentId());
-document.upload(revisedBytes).save();
-var history = document.versions();
-var audit = document.audit();
+    .save().and().archive();
 ```
 
+Or continue in a callback:
+
+```java
+bridge.upload(bytes)
+    .toOwner("Invoice", "42")
+    .metadata("category", "invoice")
+    .saveAndThen(document -> document.archive());
+```
+
+Each example uploads one file once, then archives its document. A second upload
+is needed only when adding another content version.
 The fluent API supplies SHA-256 for byte arrays and a fresh request key for each
 save. Use an explicit request key when an upload must support idempotent retries.
 
@@ -94,8 +100,8 @@ core/
   core.domain.audit/             audit entries and actions
   core.domain.<feature>.exception/ document, version, content and upload errors
   core.port.in/                  DocumentBridge
-    document/                    metadata, archive and delete commands
-    upload/                      attach, add-version and reconciliation commands
+    document/                    lifecycle commands, fluent contexts and results
+    upload/                      upload commands and fluent drafts
   core.port.out/
     document/                    document reads and lifecycle persistence
     version/                     version lookup and history
@@ -216,7 +222,42 @@ var upload = bridge.upload(bytes)
 
 var first = upload.save();
 var replay = upload.save();
+assert first.result().equals(replay.result());
 ```
+
+`save()` returns `DocumentResult<T>`: `result()` exposes the immutable operation
+snapshot and `and()` continues on the same document without another lookup or
+upload. For example, after saving one file:
+
+```java
+var saved = upload.save();
+var version = saved.result();
+var document = saved.and();
+var history = document.versions();
+var audit = document.audit();
+try (var input = document.content()) {
+    // Read the version selected by this upload; close the stream here.
+}
+```
+
+`document.upload(revisedBytes).save()` adds the next content version. Its result
+selects that new version for `content()`; an earlier result still selects its
+original version. Metadata and archive continuations preserve that selection.
+No context caches document state or bypasses download visibility checks.
+
+`saveAndThen(action)` is equivalent to `save().andThen(action)` and returns the
+original operation result after the callback. Callbacks accept document operations
+and checked `IOException`, including reads through `content()`. They run once per
+normally returning save, including keyed replays returning `PENDING` or `FAILED`.
+An upload exception skips the callback. A callback exception propagates unchanged;
+previously committed operations remain committed. The chain is sequential and uses
+the existing transaction boundary of each operation. Retrying a keyed upload runs
+its callback again, so upload idempotency does not make arbitrary callbacks
+idempotent.
+
+The fluent return types have changed: use `save().result()` to obtain the former
+`DocumentVersion` or `BusinessDocument` snapshot, and `archive().result()` for an
+archive snapshot. Command-based facade return types are unchanged.
 
 Every unkeyed `save()` creates a new request, including repeated saves of one
 draft. A keyed save follows the existing replay/conflict rules. Draft configuration
@@ -233,7 +274,7 @@ try (var input = Files.newInputStream(path)) {
     var version = bridge.upload(input, expectedSha256)
         .toOwner("Invoice", "42")
         .requestId(requestId)
-        .save();
+        .save().result();
 }
 ```
 
@@ -242,7 +283,8 @@ replay. Supply a fresh stream for a new upload. Large content can use this path
 without the byte-array snapshot. Checksums accept `ContentSha256` or its hex string;
 `ContentSha256.of(bytes)` is available for callers that need the value explicitly.
 
-`bridge.document(id)` binds the id without loading or caching its state. Its
+For a document id obtained elsewhere, `bridge.document(id)` binds the id without
+loading or caching its state. Its
 terminal reads are `get()`, `versions()`, `audit()` and `content(versionId)`;
 callers close returned content streams. `upload(...)` starts a version draft,
 while `archive()` and `delete()` execute those operations directly. Metadata uses
@@ -344,12 +386,11 @@ var current = document.get().orElseThrow();
 var updated = document.replaceMetadata(Map.of("category", "revised"))
     .atRevision(current.revision())
     .save();
-document.archive();
-document.delete();
+updated.and().archive().and().delete();
 ```
 
-Metadata is replaced completely, including on archived documents. The returned
-snapshot carries the next revision. A stale `expectedRevision` conflicts; an empty
+Metadata is replaced completely, including on archived documents. `updated.result()`
+carries the next revision. A stale `expectedRevision` conflicts; an empty
 map clears metadata. Content-version allocation does not advance document revision.
 
 Repeated archive/delete produces no additional change or audit. Deleted documents
@@ -411,7 +452,7 @@ After `./mvnw verify`:
 java -jar sample-app/target/dokubridge-sample-app-0.1.0-SNAPSHOT.jar
 ```
 
-The console application uses the fluent API, enables library schema initialization,
+The console application uses fluent continuations and callbacks, enables library schema initialization,
 validates the JPA schema, attaches a document, replays the request, adds version 2 and verifies its
 download, ordered version history and audit through `DocumentBridge`. It then
 replaces metadata, archives and logically deletes that example document, verifies read invisibility, prints its id

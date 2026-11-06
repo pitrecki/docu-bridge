@@ -25,16 +25,21 @@ class FluentStagesCompilationTest {
     void publicFlowCompilesWithOnlyTheCoreOnTheClasspath() throws Exception {
         var diagnostics = new DiagnosticCollector<JavaFileObject>();
         assertThat(compile("""
-                var version = bridge.upload(bytes).toOwner("Invoice", "42")
+                var saved = bridge.upload(bytes).toOwner("Invoice", "42")
                         .metadata("category", "invoice").requestId(id).save();
-                var document = bridge.document(version.documentId());
-                document.upload(bytes).save();
+                var version = saved.result();
+                var document = saved.and();
                 Map<String, String> metadata = Map.of("category", "invoice");
-                bridge.upload(bytes).toOwner("Invoice", "42").metadata(metadata).save();
-                document.replaceMetadata(metadata).atRevision(0).save();
+                document.upload(bytes).save().and()
+                        .replaceMetadata(metadata).atRevision(0).save().and()
+                        .archive().and().audit();
+                bridge.upload(bytes).toOwner("Invoice", "42").saveAndThen(doc -> {
+                    doc.upload(bytes).saveAndThen(next -> {
+                        try (var input = next.content()) { input.readAllBytes(); }
+                    });
+                    doc.replaceMetadata(metadata).atRevision(0).saveAndThen(updated -> updated.archive());
+                });
                 document.versions();
-                document.audit();
-                document.archive();
                 document.delete();
                 """, diagnostics)).withFailMessage(diagnostics.getDiagnostics().toString()).isTrue();
     }
@@ -53,7 +58,10 @@ class FluentStagesCompilationTest {
     static Stream<Arguments> incompleteFlows() {
         return Stream.of(
                 Arguments.of("bridge.upload(bytes).save();", "save"),
+                Arguments.of("bridge.upload(bytes).saveAndThen(doc -> {});", "saveAndThen"),
+                Arguments.of("bridge.upload(bytes).toOwner(\"Invoice\", \"42\").and();", "and"),
                 Arguments.of("bridge.document(id).replaceMetadata(Map.of()).save();", "save"),
+                Arguments.of("bridge.document(id).replaceMetadata(Map.of()).saveAndThen(doc -> {});", "saveAndThen"),
                 Arguments.of("bridge.document(id).upload(bytes).metadata(\"key\", \"value\");", "metadata"));
     }
 
