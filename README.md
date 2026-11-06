@@ -302,7 +302,26 @@ remain supported; no additional Spring bean or storage adapter is needed.
 `documentsForOwner(type, id)` returns immutable results with the same visible
 documents and order as `findByOwner`. It also accepts a `DocumentOwnerRef`.
 `result()` exposes the query snapshot without another lookup; `and()` continues
-on that document:
+on that document. A lookup can return several documents for one owner.
+
+To update the first result when one exists:
+
+```java
+bridge.documentsForOwner("Invoice", "42").stream().findFirst()
+    .ifPresent(found -> {
+        var snapshot = found.result();
+        found.and().replaceMetadata(Map.of("category", "reviewed"))
+            .atRevision(snapshot.revision())
+            .save();
+    });
+```
+
+`result()` supplies metadata and the observed revision from the original query.
+`and()` binds subsequent operations to that document without extracting its UUID.
+The first result does not imply the newest document; select by your application's
+criteria when an owner has several documents.
+
+To update every result:
 
 ```java
 for (var found : bridge.documentsForOwner("Invoice", "42")) {
