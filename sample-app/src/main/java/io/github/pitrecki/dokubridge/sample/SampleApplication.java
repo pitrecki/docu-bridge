@@ -45,17 +45,18 @@ public class SampleApplication {
         try (var stream = next.and().content()) {
             if (!Arrays.equals(stream.readAllBytes(), revised)) throw new IOException("Downloaded content differs");
         }
+        var found = bridge.documentsForOwner("Invoice", "sample-42").stream()
+                .filter(candidate -> candidate.result().id().equals(first.documentId()))
+                .findFirst().orElseThrow(() -> new IllegalStateException("Owner lookup omitted the document"));
         if (first.state() != DocumentVersionState.AVAILABLE || second.number() != 2
-                || document.get().isEmpty()
-                || bridge.findByOwner("Invoice", "sample-42").stream().noneMatch(candidate -> candidate.id().equals(first.documentId()))) {
+                || document.get().isEmpty()) {
             throw new IllegalStateException("Document workflow failed");
         }
         var history = document.versions();
         if (!history.equals(List.of(first, second))) throw new IllegalStateException("Version history differs");
         if (document.audit().size() != 4) throw new IllegalStateException("Active audit differs");
-        var current = document.get().orElseThrow();
-        var updated = document.replaceMetadata(Map.of("category", "revised"))
-                .atRevision(current.revision())
+        var updated = found.and().replaceMetadata(Map.of("category", "revised"))
+                .atRevision(found.result().revision())
                 .save();
         var archived = updated.and().archive();
         if (archived.result().revision() != updated.result().revision() + 1) throw new IllegalStateException("Archive revision differs");
@@ -69,9 +70,9 @@ public class SampleApplication {
         document.delete();
         document.delete();
         if (document.get().isPresent()
-                || bridge.findByOwner("Invoice", "sample-42").stream().anyMatch(candidate -> candidate.id().equals(first.documentId()))) {
+                || bridge.documentsForOwner("Invoice", "sample-42").stream().anyMatch(candidate -> candidate.result().id().equals(first.documentId()))) {
             throw new IllegalStateException("Deleted document is still visible");
         }
-        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with version history 1 and 2, audited events, metadata, archive and logical deletion");
+        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with owner lookup, version history 1 and 2, audited events, metadata, archive and logical deletion");
     }
 }

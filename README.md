@@ -297,6 +297,30 @@ by the host, version numbering, revision conflicts, audit and transaction behavi
 remain the same. Existing command-based calls and custom facade implementations
 remain supported; no additional Spring bean or storage adapter is needed.
 
+### Documents by owner
+
+`documentsForOwner(type, id)` returns immutable results with the same visible
+documents and order as `findByOwner`. It also accepts a `DocumentOwnerRef`.
+`result()` exposes the query snapshot without another lookup; `and()` continues
+on that document:
+
+```java
+for (var found : bridge.documentsForOwner("Invoice", "42")) {
+    found.and().replaceMetadata(Map.of("category", "reviewed"))
+        .atRevision(found.result().revision())
+        .save();
+}
+```
+
+Active and archived documents are visible; deleted documents are hidden. An owner
+without documents has an empty list. Results retain their original snapshots;
+continuations use current state, so a later deletion hides the document and a
+changed revision can conflict. The lookup selects no content version: use
+`content(versionId)` or a subsequent upload's continuation for downloads.
+The host authorizes access. There is no pagination or transaction spanning the
+lookup and subsequent operations. Existing custom facades inherit this method
+through their `findByOwner` implementation.
+
 ## Version history
 
 ```java
@@ -452,7 +476,7 @@ After `./mvnw verify`:
 java -jar sample-app/target/dokubridge-sample-app-0.1.0-SNAPSHOT.jar
 ```
 
-The console application uses fluent continuations and callbacks, enables library schema initialization,
+The console application uses fluent continuations, callbacks and owner lookup, enables library schema initialization,
 validates the JPA schema, attaches a document, replays the request, adds version 2 and verifies its
 download, ordered version history and audit through `DocumentBridge`. It then
 replaces metadata, archives and logically deletes that example document, verifies read invisibility, prints its id

@@ -475,6 +475,59 @@ class FluentDocumentBridgeTest {
     }
 
     @Test
+    void ownerResultsExposeVisibleSnapshotsAndContinueOnTheSelectedDocument() throws Exception {
+        var active = bridge.upload(bytes).toOwner("Invoice", "42").metadata("category", "active").save();
+        var archived = bridge.upload(bytes).toOwner("Invoice", "42").metadata("category", "original")
+                .save().and().archive();
+        bridge.upload(bytes).toOwner("Invoice", "42").save().and().delete();
+        bridge.upload(bytes).toOwner("Order", "42").save();
+        bridge.upload(bytes).toOwner("Invoice", "43").save();
+
+        var found = bridge.documentsForOwner("Invoice", "42");
+        assertThat(found).extracting(result -> result.result().id())
+                .containsExactlyInAnyOrder(active.and().id(), archived.and().id());
+        var selected = found.stream().filter(result -> result.result().state() == BusinessDocumentState.ARCHIVED)
+                .findFirst().orElseThrow();
+        var updated = selected.and().replaceMetadata(Map.of("category", "changed"))
+                .atRevision(selected.result().revision()).save();
+        var next = updated.and().upload(new byte[]{7}).save();
+        assertThat(next.result().documentId()).isEqualTo(selected.result().id());
+        assertThat(next.result().number()).isEqualTo(2);
+        try (var input = next.and().content()) {
+            assertThat(input.readAllBytes()).containsExactly((byte) 7);
+        }
+        assertThat(selected.result().metadata()).containsEntry("category", "original");
+        assertThat(selected.result().revision()).isEqualTo(1);
+        assertThat(selected.and().get().orElseThrow().metadata()).containsEntry("category", "changed");
+        assertThat(selected.and().get().orElseThrow().revision()).isEqualTo(2);
+        assertThat(selected.and().audit()).hasSize(6);
+        var fresh = bridge.documentsForOwner(new DocumentOwnerRef("Invoice", "42")).stream()
+                .filter(result -> result.result().state() == BusinessDocumentState.ARCHIVED).findFirst().orElseThrow();
+        assertThat(fresh.result().metadata()).containsEntry("category", "changed");
+        assertThat(fresh.result().revision()).isEqualTo(2);
+        assertThat(active.and().versions()).containsExactly(active.result());
+    }
+
+    @Test
+    void ownerContinuationRechecksDeletionAndRetainsOnlyTheHistoricalSnapshot() throws Exception {
+        var saved = bridge.upload(bytes).toOwner("Invoice", "42").save();
+        var found = bridge.documentsForOwner("Invoice", "42").getFirst();
+        saved.and().delete();
+
+        assertThat(found.result().state()).isEqualTo(BusinessDocumentState.ACTIVE);
+        assertThat(found.and().get()).isEmpty();
+        assertThat(bridge.documentsForOwner("Invoice", "42")).isEmpty();
+        assertThatThrownBy(found.and()::versions).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(found.and()::audit).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(found.and()::archive).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(() -> found.and().replaceMetadata(Map.of()).atRevision(found.result().revision()).save())
+                .isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(() -> found.and().upload(bytes).save()).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(() -> found.and().content(saved.result().id())).isInstanceOf(DocumentNotFoundException.class);
+        assertThat(audits.findByDocument(saved.and().id())).hasSize(3);
+    }
+
+    @Test
     void recoveryCanBeInvokedWithoutConstructingACommand() throws Exception {
         UUID key = UUID.randomUUID();
         var pending = uploads.reserveAttach(key, "a".repeat(64), new DocumentOwnerRef("Invoice", "42"), Map.of(),

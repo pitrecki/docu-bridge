@@ -11,6 +11,7 @@ import io.github.pitrecki.dokubridge.core.domain.version.exception.DocumentVersi
 import io.github.pitrecki.dokubridge.core.port.in.document.Archive;
 import io.github.pitrecki.dokubridge.core.port.in.document.Delete;
 import io.github.pitrecki.dokubridge.core.port.in.document.DocumentHandle;
+import io.github.pitrecki.dokubridge.core.port.in.document.DocumentResult;
 import io.github.pitrecki.dokubridge.core.port.in.document.UpdateMetadata;
 import io.github.pitrecki.dokubridge.core.port.in.upload.AddDocumentVersion;
 import io.github.pitrecki.dokubridge.core.port.in.upload.AttachDocument;
@@ -19,6 +20,7 @@ import io.github.pitrecki.dokubridge.core.port.in.upload.ReconcileUpload;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -45,6 +47,23 @@ public interface DocumentBridge {
 
     default List<BusinessDocument> findByOwner(String type, String id) {
         return findByOwner(new DocumentOwnerRef(type, id));
+    }
+
+    /** Fluent owner lookup with the same visibility rules as {@link #findByOwner(DocumentOwnerRef)}. */
+    default List<DocumentResult<BusinessDocument>> documentsForOwner(String type, String id) {
+        return documentsForOwner(new DocumentOwnerRef(type, id));
+    }
+
+    /**
+     * Returns immutable query results with document continuations, without loading each document again.
+     * {@code result()} retains the query snapshot; {@code and()} binds subsequent operations to its id.
+     * No content version is selected. The query retains the order of {@link #findByOwner(DocumentOwnerRef)}
+     * and performs no content I/O. The host application authorizes access.
+     */
+    default List<DocumentResult<BusinessDocument>> documentsForOwner(DocumentOwnerRef owner) {
+        return findByOwner(Objects.requireNonNull(owner, "Document owner must not be null")).stream()
+                .map(document -> DocumentResult.found(this, document))
+                .toList();
     }
 
     default DocumentVersion reconcileUpload(UUID requestId, UUID versionId) throws IOException {

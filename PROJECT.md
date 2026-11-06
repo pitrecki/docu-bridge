@@ -57,6 +57,18 @@ Fluent archive returns the same result wrapper. Command-based facade methods kee
 their original domain return types; existing fluent clients obtain those snapshots
 with `save().result()` or `archive().result()`.
 
+`documentsForOwner(type, id)` and its `DocumentOwnerRef` overload return an immutable
+list of `DocumentResult<BusinessDocument>`. They wrap one `findByOwner` invocation,
+preserve its visible snapshots and order, and bind each continuation to that same
+facade. Reading `result()` or obtaining `and()` performs no per-document lookup or
+content I/O. Active and archived documents are visible; deleted documents are hidden.
+An owner without documents has an empty list, while query errors propagate.
+The query snapshots remain unchanged by later mutations. Continuations use current
+state and preserve normal deletion and revision checks. They select no content
+version. There is no pagination or transaction spanning lookup and later operations.
+The host authorizes access. Existing custom facades inherit the operation through
+their existing query implementation.
+
 An upload continuation selects its resulting version for no-argument `content()`.
 Metadata and archive continuations preserve that selection; another upload selects
 its own version without changing earlier handles. Explicit `content(versionId)`

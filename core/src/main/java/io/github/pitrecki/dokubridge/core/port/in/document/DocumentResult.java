@@ -32,6 +32,12 @@ public final class DocumentResult<T> {
         return new DocumentResult<>(version, DocumentHandle.forVersion(bridge, version));
     }
 
+    /** Binds a query snapshot without another lookup, cached document state or selected content version. */
+    public static DocumentResult<BusinessDocument> found(DocumentBridge bridge, BusinessDocument snapshot) {
+        Objects.requireNonNull(snapshot, "Document snapshot must not be null");
+        return changed(new DocumentHandle(bridge, snapshot.id()), snapshot);
+    }
+
     static DocumentResult<BusinessDocument> changed(DocumentHandle document, BusinessDocument snapshot) {
         Objects.requireNonNull(snapshot, "Document snapshot must not be null");
         if (!document.id().equals(snapshot.id())) {

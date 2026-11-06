@@ -40,6 +40,10 @@ class FluentStagesCompilationTest {
                     doc.replaceMetadata(metadata).atRevision(0).saveAndThen(updated -> updated.archive());
                 });
                 document.versions();
+                for (var found : bridge.documentsForOwner("Invoice", "42")) {
+                    found.and().replaceMetadata(metadata).atRevision(found.result().revision())
+                            .saveAndThen(updated -> updated.archive());
+                }
                 document.delete();
                 """, diagnostics)).withFailMessage(diagnostics.getDiagnostics().toString()).isTrue();
     }
