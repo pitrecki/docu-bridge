@@ -4,6 +4,7 @@ import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocument;
 import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocumentState;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
 import jakarta.persistence.*;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -26,6 +27,11 @@ public class BusinessDocumentEntity {
     }
 
     public BusinessDocumentEntity(UUID id, DocumentOwnerRef owner, Map<String, Object> metadata) {
+        // JDBC replaces malformed UTF-16 with '?', which would change the document's owner.
+        var utf8 = StandardCharsets.UTF_8.newEncoder();
+        if (!utf8.canEncode(owner.type()) || !utf8.canEncode(owner.id())) {
+            throw new IllegalArgumentException("Document owner must be representable as UTF-8");
+        }
         this.id = id;
         this.ownerType = owner.type();
         this.ownerId = owner.id();

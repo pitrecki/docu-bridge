@@ -20,6 +20,16 @@ factory (scanning `io.github.pitrecki.dokubridge.adapter.jpa`) and a shared `Ent
 Run migrations before Hibernate schema validation. See the PostgreSQL integration
 test for a working bootstrap without Spring Boot auto-configuration.
 
+Owner type and id are stored as text. The JPA adapter checks that both can be
+encoded as UTF-8 without replacement, using the JDK charset encoder. Unpaired
+UTF-16 surrogates raise `IllegalArgumentException` during attachment or owner
+lookup, including paged queries. This prevents the JDBC driver from silently
+replacing a malformed character with `?` and selecting a different owner.
+Failed attachment reservations roll back before content is written; their request
+keys remain reusable. Valid supplementary Unicode characters and literal question
+marks are supported. An already stored `?` is an ordinary character whose original
+intent cannot be inferred from the stored owner reference.
+
 Metadata is stored as JSONB. The adapter decodes integers as `BigInteger` and
 fractional numbers as `BigDecimal`, preserving precision without configuring the
 host's global JSON mapper. Java numeric wrapper classes and JSON object key order

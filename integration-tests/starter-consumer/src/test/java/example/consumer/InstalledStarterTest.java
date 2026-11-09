@@ -48,6 +48,8 @@ class InstalledStarterTest {
                         "--dokubridge.storage.root=" + storage)) {
             var bridge = context.getBean(DocumentBridge.class);
             byte[] bytes = "external consumer".getBytes(StandardCharsets.UTF_8);
+            assertThatIllegalArgumentException().isThrownBy(() -> bridge.upload(bytes)
+                    .toOwner("Invoice" + (char) 0xD800, "external-42").save()).withMessageContaining("UTF-8");
             var numericMetadata = new BigInteger("9".repeat(1_001));
             var upload = bridge.upload(bytes).toOwner("Invoice", "external-42")
                     .metadata("origin", "external").metadata("numeric", numericMetadata).requestId(UUID.randomUUID());

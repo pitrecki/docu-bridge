@@ -6,6 +6,7 @@ import io.github.pitrecki.dokubridge.core.domain.document.BusinessDocumentState;
 import io.github.pitrecki.dokubridge.core.domain.document.DocumentOwnerRef;
 import io.github.pitrecki.dokubridge.core.port.out.document.BusinessDocumentRepository;
 import jakarta.persistence.EntityManager;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -36,7 +37,7 @@ public final class JpaBusinessDocumentRepository implements BusinessDocumentRepo
 
     @Override
     public List<BusinessDocument> findByOwner(DocumentOwnerRef owner) {
-        Objects.requireNonNull(owner);
+        requireEncodableOwner(owner);
         return read.execute(status -> entities.createQuery("""
                 select new io.github.pitrecki.dokubridge.adapter.jpa.document.persistence.BusinessDocumentRow(
                     d.id, d.ownerType, d.ownerId, d.metadata, d.state, d.revision)
@@ -47,7 +48,7 @@ public final class JpaBusinessDocumentRepository implements BusinessDocumentRepo
 
     @Override
     public List<BusinessDocument> findVisibleByOwner(DocumentOwnerRef owner, int limit, UUID afterDocumentId) {
-        Objects.requireNonNull(owner, "Document owner must not be null");
+        requireEncodableOwner(owner);
         if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Owner lookup limit must be between 1 and 1000");
         return read.execute(status -> {
             var query = entities.createQuery("""
@@ -63,5 +64,13 @@ public final class JpaBusinessDocumentRepository implements BusinessDocumentRepo
             if (afterDocumentId != null) query.setParameter("after", afterDocumentId);
             return query.getResultList().stream().map(BusinessDocumentRow::snapshot).toList();
         });
+    }
+
+    private static void requireEncodableOwner(DocumentOwnerRef owner) {
+        Objects.requireNonNull(owner, "Document owner must not be null");
+        var utf8 = StandardCharsets.UTF_8.newEncoder();
+        if (!utf8.canEncode(owner.type()) || !utf8.canEncode(owner.id())) {
+            throw new IllegalArgumentException("Document owner must be representable as UTF-8");
+        }
     }
 }

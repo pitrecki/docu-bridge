@@ -102,6 +102,62 @@ class FluentDocumentBridgeTest {
     }
 
     @ParameterizedTest(name = "{0}")
+    @MethodSource("malformedOwners")
+    void malformedOwnerTextCannotAliasAnotherOwnerOrLeaveAnUploadReservation(
+            String description, DocumentOwnerRef malformed, DocumentOwnerRef literalQuestionMark) throws Exception {
+        var writes = new AtomicInteger();
+        var guarded = usingStore(new DocumentContentStore() {
+            public void store(UUID id, InputStream source) throws IOException {
+                writes.incrementAndGet();
+                files.store(id, source);
+            }
+            public InputStream open(UUID id) throws IOException { return files.open(id); }
+        });
+        var existing = guarded.upload(bytes).toOwner(literalQuestionMark).save();
+        UUID key = UUID.randomUUID();
+        var invalid = guarded.upload(bytes).toOwner(malformed).requestId(key);
+        assertThatIllegalArgumentException().isThrownBy(invalid::save).withMessageContaining("UTF-8");
+        assertThat(writes).hasValue(1);
+        assertThat(guarded.documentsForOwner(literalQuestionMark)).extracting(result -> result.result().id())
+                .containsExactly(existing.and().id());
+
+        var documents = new JpaBusinessDocumentRepository(entities, transactions);
+        assertThatIllegalArgumentException().isThrownBy(() -> documents.findByOwner(malformed));
+        assertThatIllegalArgumentException().isThrownBy(() -> documents.findVisibleByOwner(malformed, 1, null));
+        assertThatIllegalArgumentException().isThrownBy(() -> guarded.documentsForOwner(malformed));
+        assertThatIllegalArgumentException().isThrownBy(() -> guarded.documentsForOwner(malformed, 1));
+
+        var corrected = guarded.upload(bytes).toOwner(literalQuestionMark).requestId(key).save();
+        assertThat(corrected.result().state()).isEqualTo(DocumentVersionState.AVAILABLE);
+        assertThat(writes).hasValue(2);
+        assertThat(guarded.documentsForOwner(literalQuestionMark)).extracting(result -> result.result().id())
+                .containsExactlyInAnyOrder(existing.and().id(), corrected.and().id());
+        assertThat(guarded.pendingUploads(100)).isEmpty();
+    }
+
+    static Stream<Arguments> malformedOwners() {
+        var typeQuestionMark = new DocumentOwnerRef("Invoice?", "42");
+        var idQuestionMark = new DocumentOwnerRef("Invoice", "42?");
+        return Stream.of(
+                Arguments.of("high surrogate in owner type", new DocumentOwnerRef("Invoice" + (char) 0xD800, "42"), typeQuestionMark),
+                Arguments.of("low surrogate in owner type", new DocumentOwnerRef("Invoice" + (char) 0xDC00, "42"), typeQuestionMark),
+                Arguments.of("high surrogate in owner id", new DocumentOwnerRef("Invoice", "42" + (char) 0xD800), idQuestionMark),
+                Arguments.of("low surrogate in owner id", new DocumentOwnerRef("Invoice", "42" + (char) 0xDC00), idQuestionMark));
+    }
+
+    @Test
+    void unicodeOwnerIdentitySurvivesStorageLookupAndIdempotentReplay() throws Exception {
+        var owner = new DocumentOwnerRef("Faktura-" + Character.toString(0x1F4C4), "Łódź-42-" + Character.toString(0x1F9FE));
+        var draft = bridge.upload(bytes).toOwner(owner).requestId(UUID.randomUUID());
+        var saved = draft.save();
+        var found = bridge.findDocument(saved.and().id()).orElseThrow();
+        assertThat(found.result().owner()).isEqualTo(owner);
+        assertThat(bridge.documentsForOwner(owner, 1)).singleElement()
+                .satisfies(document -> assertThat(document.result()).isEqualTo(found.result()));
+        assertThat(draft.save().result()).isEqualTo(saved.result());
+    }
+
+    @ParameterizedTest(name = "{0}")
     @MethodSource("wideJsonbNumbers")
     void validJsonbNumbersRemainReadableAfterDatabaseNormalization(String description, Number value) throws Exception {
         var draft = bridge.upload(bytes).toOwner("Invoice", "42")
