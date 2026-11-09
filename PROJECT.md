@@ -353,6 +353,11 @@ fractional numbers as `BigDecimal`, preserving precision without configuring the
 host's global JSON mapper. Java numeric wrapper classes and JSON object key order
 are not preserved across database round trips. Domain snapshots remain deeply
 immutable.
+The adapter's private Jackson number-length limit covers PostgreSQL JSONB's
+numeric width: 131072 integer digits, 16383 fractional digits, plus sign and decimal
+point. Valid committed numeric metadata therefore remains readable beyond
+Jackson's default 1000-character number limit. Host mapper settings and the
+remaining Jackson constraints are unchanged.
 
 `DocumentUploadRepository` is a semantic transaction port. Each reservation claims
 a globally unique UUID request key and its caller-supplied SHA-256 fingerprint,

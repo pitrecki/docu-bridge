@@ -22,6 +22,8 @@ import jakarta.persistence.EntityManager;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -33,9 +35,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
@@ -93,6 +99,29 @@ class FluentDocumentBridgeTest {
         audits = new JpaDocumentAuditRepository(entities, transactions);
         files = new FilesystemDocumentContentStore(root);
         bridge = usingStore(files);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("wideJsonbNumbers")
+    void validJsonbNumbersRemainReadableAfterDatabaseNormalization(String description, Number value) throws Exception {
+        var draft = bridge.upload(bytes).toOwner("Invoice", "42")
+                .metadata("value", value).requestId(UUID.randomUUID());
+        var saved = draft.save();
+        var found = bridge.findDocument(saved.and().id()).orElseThrow();
+        assertThat(found.result().metadata()).containsEntry("value", value);
+        var updated = found.and().replaceMetadata(Map.of("value", value))
+                .atRevision(found.result().revision()).save();
+        assertThat(updated.result().revision()).isEqualTo(1);
+        var page = bridge.documentsForOwner("Invoice", "42", 1);
+        assertThat(page).singleElement().satisfies(document -> assertThat(document.result()).isEqualTo(updated.result()));
+        assertThat(draft.save().result()).isEqualTo(saved.result());
+    }
+
+    static Stream<Arguments> wideJsonbNumbers() {
+        return Stream.of(
+                Arguments.of("integer longer than Jackson's default limit", new BigInteger("9".repeat(1_001))),
+                Arguments.of("small fraction expanded by JSONB", new BigDecimal("1E-1000")),
+                Arguments.of("maximum JSONB numeric width", new BigDecimal("-" + "9".repeat(131_072) + "." + "9".repeat(16_383))));
     }
 
     @Test

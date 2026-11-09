@@ -26,6 +26,14 @@ host's global JSON mapper. Java numeric wrapper classes and JSON object key orde
 are not preserved across database round trips. Domain snapshots remain deeply
 immutable.
 
+The private metadata mapper accepts JSONB's full numeric width: up to 131072 digits
+before the decimal point and 16383 after it, including negative values. Its number
+length limit accounts for the sign and decimal point. This prevents a successful
+upload from becoming unreadable when a stored number exceeds Jackson's default
+1000-character limit. The host's mapper configuration and other Jackson parsing
+constraints are unchanged. Values outside PostgreSQL's numeric range remain
+subject to database rejection.
+
 `DocumentUploadRepository` is a semantic transaction port. Each reservation claims
 a globally unique UUID request key and its caller-supplied SHA-256 fingerprint,
 records the declared content checksum, allocates a `PENDING` version and appends

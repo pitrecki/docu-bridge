@@ -9,6 +9,7 @@ import io.github.pitrecki.dokubridge.core.port.in.document.DocumentHandle;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Map;
@@ -47,8 +48,9 @@ class InstalledStarterTest {
                         "--dokubridge.storage.root=" + storage)) {
             var bridge = context.getBean(DocumentBridge.class);
             byte[] bytes = "external consumer".getBytes(StandardCharsets.UTF_8);
+            var numericMetadata = new BigInteger("9".repeat(1_001));
             var upload = bridge.upload(bytes).toOwner("Invoice", "external-42")
-                    .metadata("origin", "external").requestId(UUID.randomUUID());
+                    .metadata("origin", "external").metadata("numeric", numericMetadata).requestId(UUID.randomUUID());
             var saved = upload.saveAndThen(document -> {
                 byte[] downloaded = document.readContent(InputStream::readAllBytes);
                 assertThat(downloaded).containsExactly(bytes);
@@ -62,6 +64,7 @@ class InstalledStarterTest {
 
             var found = bridge.documentsForOwner("Invoice", "external-42", 1).getFirst();
             assertThat(found.result().id()).isEqualTo(saved.result().documentId());
+            assertThat(found.result().metadata()).containsEntry("numeric", numericMetadata);
             assertThat(bridge.documentsForOwner("Invoice", "external-42", 1, found.result().id())).isEmpty();
             var updated = found.and().replaceMetadata(Map.of("origin", "fluent"))
                     .atRevision(found.result().revision()).save();
