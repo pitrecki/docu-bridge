@@ -76,9 +76,10 @@ content I/O. Active and archived documents are visible; deleted documents are hi
 An owner without documents has an empty list, while query errors propagate.
 The query snapshots remain unchanged by later mutations. Continuations use current
 state and preserve normal deletion and revision checks. They select no content
-version. There is no pagination or transaction spanning lookup and later operations.
-The host authorizes access. Existing custom facades inherit the operation through
-their existing query implementation.
+version. No transaction spans lookup and later operations. The overloads accepting
+a limit and optional document-id cursor provide bounded pages as described below.
+The host authorizes access. Existing custom facades inherit the unpaged operation
+through their existing query implementation.
 
 An upload continuation selects its resulting version for no-argument `content()`.
 Metadata and archive continuations preserve that selection; another upload selects
@@ -193,6 +194,25 @@ within each layer. See `docs/wiki/Architecture.md` for the public import migrati
 
 `get(id)` returns an `Optional`; `findByOwner(owner)` returns an immutable list.
 Both expose `ACTIVE` and `ARCHIVED` documents and hide `DELETED` documents.
+`findByOwner(owner, limit)` and `findByOwner(owner, limit, afterDocumentId)`
+return bounded immutable snapshots, also exposed by the fluent
+`documentsForOwner(type, id, limit[, afterDocumentId])` and owner-reference
+overloads. The limit is 1–1000; null starts the first page and the document UUID
+cursor is exclusive. Order follows canonical UUID text, not creation time or
+Java UUID's signed comparison. Each fluent result keeps its query snapshot and a
+continuation without per-document lookups or a selected content version.
+
+`BusinessDocumentRepository.findVisibleByOwner` filters owner, ACTIVE/ARCHIVED
+state and cursor before applying the limit at the data source. The facade also
+filters foreign/deleted snapshots defensively. The JPA projection avoids stale
+managed entities and joins host read transactions with their existing isolation.
+Pages are independent reads; concurrent inserts behind a cursor require a new
+scan. Listing performs no content I/O, state transition or audit. Host
+authorization remains external. Existing full-list repository/facade contracts
+are unchanged; new paged port defaults are unsupported rather than loading and
+slicing the full list. The starter uses the existing document port wiring. No
+new dependency, configuration or migration is needed.
+
 `getContent(documentId, versionId)` opens content only for a visible document and
 an `AVAILABLE` version belonging to that document. A missing or deleted document
 raises `DocumentNotFoundException`; an absent or foreign version raises

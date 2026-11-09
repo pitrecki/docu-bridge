@@ -108,6 +108,66 @@ class JpaDocumentLifecycleRepositoryTest {
     }
 
     @Test
+    void pagesOwnerDocumentsWithScopeAndVisibilityAppliedBeforeTheLimit() {
+        var deleted = persistedDocument("00000000-0000-0000-0000-000000000001", owner, BusinessDocumentState.DELETED);
+        persistedDocument("00000000-0000-0000-0000-000000000002", new DocumentOwnerRef("Order", owner.id()), BusinessDocumentState.ACTIVE);
+        persistedDocument("00000000-0000-0000-0000-000000000003", new DocumentOwnerRef(owner.type(), "other"), BusinessDocumentState.ACTIVE);
+        var first = persistedDocument("7fffffff-ffff-ffff-ffff-ffffffffffff", owner, BusinessDocumentState.ACTIVE);
+        var second = persistedDocument("80000000-0000-0000-0000-000000000000", owner, BusinessDocumentState.ARCHIVED);
+        var third = persistedDocument("ffffffff-ffff-ffff-ffff-ffffffffffff", owner, BusinessDocumentState.ACTIVE);
+        var guarded = new DefaultDocumentBridge(documents, (document, version) -> {
+            throw new AssertionError("Unexpected version lookup");
+        }, new DocumentContentStore() {
+            public void store(UUID id, InputStream input) { throw new AssertionError("Unexpected upload"); }
+            public InputStream open(UUID id) { throw new AssertionError("Unexpected download"); }
+        });
+
+        var page = guarded.documentsForOwner(owner.type(), owner.id(), 2);
+        assertThat(page).extracting(result -> result.result()).containsExactly(first, second);
+        assertThat(page).extracting(result -> result.and().id()).containsExactly(first.id(), second.id());
+        assertThat(guarded.documentsForOwner(owner, 2, page.getLast().result().id()))
+                .extracting(result -> result.result()).containsExactly(third);
+        assertThat(guarded.documentsForOwner(owner, 1, third.id())).isEmpty();
+        assertThat(guarded.findByOwner(owner, 1)).containsExactly(first);
+        assertThat(guarded.findByOwner(owner, 1000, null)).containsExactly(first, second, third);
+        assertThat(guarded.documentsForOwner(new DocumentOwnerRef("Absent", "42"), 1)).isEmpty();
+        assertThatThrownBy(page::clear).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> documents.findVisibleByOwner(owner, 1, null).clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(documents.findByOwner(owner)).containsExactly(deleted, first, second, third);
+        assertThat(guarded.findByOwner(owner)).containsExactly(first, second, third);
+        assertThat(count("dokubridge_audit")).isZero();
+    }
+
+    @Test
+    void pagedOwnerReadsObeyAnEnclosingHostRepeatableReadSnapshot() {
+        var original = persistedDocument("80000000-0000-0000-0000-000000000000", owner, BusinessDocumentState.ACTIVE);
+        var read = new TransactionTemplate(transactions);
+        read.setReadOnly(true);
+        read.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        read.executeWithoutResult(status -> {
+            assertThat(bridge.findByOwner(owner, 1)).containsExactly(original);
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                executor.submit(() -> bridge.document(original.id()).delete()).get(20, TimeUnit.SECONDS);
+            } catch (Exception failure) {
+                throw new AssertionError("Concurrent deletion failed", failure);
+            }
+            assertThat(bridge.documentsForOwner(owner, 1)).extracting(result -> result.result()).containsExactly(original);
+        });
+        assertThat(bridge.documentsForOwner(owner, 1)).isEmpty();
+        assertThat(audits.findByDocument(original.id())).extracting(DocumentAuditEntry::action)
+                .containsExactly(DocumentAuditAction.DOCUMENT_DELETED);
+    }
+
+    @Test
+    void pagedOwnerRepositoryRejectsInvalidParameters() {
+        for (int limit : new int[]{-1, 0, 1001, Integer.MAX_VALUE}) {
+            assertThatIllegalArgumentException().isThrownBy(() -> documents.findVisibleByOwner(owner, limit, null));
+        }
+        assertThatNullPointerException().isThrownBy(() -> documents.findVisibleByOwner(null, 1, null));
+    }
+
+    @Test
     void replacesAndClearsMetadataWithRevisionChecksWithoutChangingContentHistory() throws Exception {
         var version = newDocument();
         UUID id = version.documentId();
@@ -389,7 +449,7 @@ class JpaDocumentLifecycleRepositoryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"get", "findDocument", "findByOwner", "getContent", "getVersions", "getVersionsPage", "getAudit"})
+    @ValueSource(strings = {"get", "findDocument", "findByOwner", "documentsForOwnerPage", "getContent", "getVersions", "getVersionsPage", "getAudit"})
     void retainedHostContextCannotExposeACommittedDeletion(String operation) throws Exception {
         var version = newDocument();
         var retained = factory.getObject().createEntityManager();
@@ -408,6 +468,7 @@ class JpaDocumentLifecycleRepositoryTest {
                 case "get" -> assertThat(guarded.get(version.documentId())).isEmpty();
                 case "findDocument" -> assertThat(guarded.findDocument(version.documentId())).isEmpty();
                 case "findByOwner" -> assertThat(guarded.findByOwner(owner)).isEmpty();
+                case "documentsForOwnerPage" -> assertThat(guarded.documentsForOwner(owner, 10)).isEmpty();
                 case "getVersions" -> assertThatThrownBy(() -> guarded.getVersions(version.documentId()))
                         .isInstanceOf(DocumentNotFoundException.class);
                 case "getVersionsPage" -> assertThatThrownBy(() -> guarded.getVersions(version.documentId(), 10))
@@ -427,7 +488,7 @@ class JpaDocumentLifecycleRepositoryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"get", "findDocument", "findByOwner"})
+    @ValueSource(strings = {"get", "findDocument", "findByOwner", "documentsForOwnerPage"})
     void retainedHostContextReturnsCommittedMetadataRevisionAndState(String operation) throws Exception {
         var version = newDocument();
         var retained = factory.getObject().createEntityManager();
@@ -446,6 +507,7 @@ class JpaDocumentLifecycleRepositoryTest {
                 case "get" -> bridge.get(version.documentId()).orElseThrow();
                 case "findDocument" -> bridge.findDocument(version.documentId()).orElseThrow().result();
                 case "findByOwner" -> bridge.findByOwner(owner).getFirst();
+                case "documentsForOwnerPage" -> bridge.documentsForOwner(owner, 10).getFirst().result();
                 default -> throw new AssertionError("Unknown read operation");
             };
             assertThat(result).isEqualTo(changed);
@@ -605,6 +667,17 @@ class JpaDocumentLifecycleRepositoryTest {
 
     private DocumentVersion newDocument() throws IOException {
         return bridge.attach(new AttachDocument(initialRequest, owner, Map.of("old", true), checksum, bytes()));
+    }
+
+    private BusinessDocument persistedDocument(String id, DocumentOwnerRef owner, BusinessDocumentState state) {
+        var snapshot = new BusinessDocument(UUID.fromString(id), owner, Map.of("kind", "invoice"), state);
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            var entity = new io.github.pitrecki.dokubridge.adapter.jpa.document.persistence.BusinessDocumentEntity(
+                    snapshot.id(), owner, snapshot.metadata());
+            entity.applyDocumentChange(snapshot);
+            entities.persist(entity);
+        });
+        return snapshot;
     }
 
     private void mutate(DocumentAuditAction action, UUID id) {

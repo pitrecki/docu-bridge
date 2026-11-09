@@ -164,6 +164,19 @@ public final class DefaultDocumentBridge implements DocumentBridge {
     }
 
     @Override
+    public List<BusinessDocument> findByOwner(DocumentOwnerRef owner, int limit, UUID afterDocumentId) {
+        Objects.requireNonNull(owner, "Document owner must not be null");
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Owner lookup limit must be between 1 and 1000");
+        return documents.findVisibleByOwner(owner, limit, afterDocumentId).stream()
+                .filter(document -> document.owner().equals(owner))
+                .filter(document -> document.state() != BusinessDocumentState.DELETED)
+                .filter(document -> afterDocumentId == null || document.id().toString().compareTo(afterDocumentId.toString()) > 0)
+                .sorted(Comparator.comparing(document -> document.id().toString()))
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
     public List<DocumentVersion> getVersions(UUID documentId) {
         Objects.requireNonNull(documentId, "Document id must not be null");
         get(documentId).orElseThrow(() -> new DocumentNotFoundException(documentId));

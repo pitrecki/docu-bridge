@@ -79,6 +79,31 @@ public interface DocumentBridge {
                 .toList();
     }
 
+    /** Reads the first page of visible documents with fluent continuations. */
+    default List<DocumentResult<BusinessDocument>> documentsForOwner(String type, String id, int limit) {
+        return documentsForOwner(new DocumentOwnerRef(type, id), limit);
+    }
+
+    default List<DocumentResult<BusinessDocument>> documentsForOwner(String type, String id, int limit, UUID afterDocumentId) {
+        return documentsForOwner(new DocumentOwnerRef(type, id), limit, afterDocumentId);
+    }
+
+    default List<DocumentResult<BusinessDocument>> documentsForOwner(DocumentOwnerRef owner, int limit) {
+        return documentsForOwner(owner, limit, null);
+    }
+
+    /**
+     * Returns an immutable page of visible snapshots and continuations in canonical UUID order.
+     * The document-id cursor is exclusive; null starts the first page. Limit must be 1..1000.
+     * No content version is selected or opened; accessing result/continuation adds no lookup.
+     * Pages are independent reads under the host's transaction isolation. The host authorizes access.
+     */
+    default List<DocumentResult<BusinessDocument>> documentsForOwner(DocumentOwnerRef owner, int limit, UUID afterDocumentId) {
+        return findByOwner(Objects.requireNonNull(owner, "Document owner must not be null"), limit, afterDocumentId).stream()
+                .map(document -> DocumentResult.found(this, document))
+                .toList();
+    }
+
     default DocumentVersion reconcileUpload(UUID requestId, UUID versionId) throws IOException {
         return reconcileUpload(new ReconcileUpload(requestId, versionId));
     }
@@ -138,6 +163,18 @@ public interface DocumentBridge {
 
     /** Returns an immutable list of the owner's non-deleted documents. */
     List<BusinessDocument> findByOwner(DocumentOwnerRef owner);
+
+    default List<BusinessDocument> findByOwner(DocumentOwnerRef owner, int limit) {
+        return findByOwner(owner, limit, null);
+    }
+
+    /**
+     * Reads visible owner documents in canonical UUID order after the exclusive cursor.
+     * Null starts the first page. Limit must be 1..1000; deleted documents are excluded before limiting.
+     */
+    default List<BusinessDocument> findByOwner(DocumentOwnerRef owner, int limit, UUID afterDocumentId) {
+        throw new UnsupportedOperationException("Paged owner lookup is not configured");
+    }
 
     /** Returns an immutable version history in number order, including pending and failed versions. */
     default List<DocumentVersion> getVersions(UUID documentId) {

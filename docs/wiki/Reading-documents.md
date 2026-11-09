@@ -66,9 +66,47 @@ without documents has an empty list. Results retain their original snapshots;
 continuations use current state, so a later deletion hides the document and a
 changed revision can conflict. The lookup selects no content version: use
 `content(versionId)` or a subsequent upload's continuation for downloads.
-The host authorizes access. There is no pagination or transaction spanning the
-lookup and subsequent operations. Existing custom facades inherit this method
-through their `findByOwner` implementation.
+The host authorizes access. No transaction spans the lookup and subsequent
+operations. Existing custom facades inherit the unpaged method through their
+`findByOwner` implementation.
+
+### Paged owner lookup
+
+```java
+var page = bridge.documentsForOwner("Invoice", "42", 100);
+if (!page.isEmpty()) {
+    var nextPage = bridge.documentsForOwner("Invoice", "42", 100,
+        page.getLast().result().id());
+}
+```
+
+The overloads also accept `DocumentOwnerRef`. Pages retain immutable query
+snapshots through `result()` and document continuations through `and()`, without
+individual document lookups or content reads. No content version is selected.
+Use the continuation to update metadata at the snapshot's revision, archive a
+document or add its next content version.
+
+Limits are 1–1000. Results are ordered by canonical UUID text, with an exclusive
+document-id cursor; null starts the first page. UUID ordering does not indicate
+creation time. JPA filters by both owner fields, visibility and cursor before
+applying the limit in the database. Deleted documents cannot consume page slots.
+An owner without visible documents has an empty page. The original overloads
+without a limit still return the full list.
+
+Pages are independent reads that obey an enclosing host transaction's isolation.
+Concurrent inserts behind the cursor require starting another scan; metadata and
+state can change between pages. A continuation still checks current visibility
+and revision, while its original snapshot remains unchanged. The host authorizes
+access. No content I/O, audit or state change occurs while listing.
+
+The snapshot facade exposes `findByOwner(owner, limit)` and
+`findByOwner(owner, limit, afterDocumentId)`. Custom facades implement its paged
+query to enable fluent pages; the default is unsupported. Custom document
+repositories implement `findVisibleByOwner(owner, limit, afterDocumentId)` and
+must filter visibility and cursor before limiting at the data source. Existing
+unpaged implementations remain usable without loading their full lists as a
+paging fallback. The JPA adapter and starter need no new dependency,
+configuration or schema migration.
 
 ## Version history
 

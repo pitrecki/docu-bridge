@@ -60,8 +60,9 @@ class InstalledStarterTest {
                     .containsExactly(DocumentAuditAction.DOCUMENT_ATTACHED, DocumentAuditAction.UPLOAD_SUCCEEDED);
             verifyInFlightDiscovery(bridge, saved.and(), bytes);
 
-            var found = bridge.documentsForOwner("Invoice", "external-42").getFirst();
+            var found = bridge.documentsForOwner("Invoice", "external-42", 1).getFirst();
             assertThat(found.result().id()).isEqualTo(saved.result().documentId());
+            assertThat(bridge.documentsForOwner("Invoice", "external-42", 1, found.result().id())).isEmpty();
             var updated = found.and().replaceMetadata(Map.of("origin", "fluent"))
                     .atRevision(found.result().revision()).save();
             assertThat(updated.result().revision()).isEqualTo(1);
@@ -74,6 +75,7 @@ class InstalledStarterTest {
             assertThat(saved.and().get()).isEmpty();
             assertThat(bridge.findDocument(saved.result().documentId())).isEmpty();
             assertThat(bridge.documentsForOwner("Invoice", "external-42")).isEmpty();
+            assertThat(bridge.documentsForOwner("Invoice", "external-42", 1)).isEmpty();
             assertThat(found.result().metadata()).containsEntry("origin", "external");
         }
     }

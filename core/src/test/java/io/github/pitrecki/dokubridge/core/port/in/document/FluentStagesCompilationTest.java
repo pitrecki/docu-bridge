@@ -49,6 +49,10 @@ class FluentStagesCompilationTest {
                     found.and().replaceMetadata(metadata).atRevision(found.result().revision())
                             .saveAndThen(updated -> updated.archive());
                 }
+                var ownerPage = bridge.documentsForOwner("Invoice", "42", 10);
+                if (!ownerPage.isEmpty()) {
+                    bridge.documentsForOwner("Invoice", "42", 10, ownerPage.getLast().result().id());
+                }
                 bridge.findDocument(id).ifPresent(found -> found.and()
                         .replaceMetadata(metadata).atRevision(found.result().revision()).save());
                 for (var pending : bridge.pendingUploads(100)) {
