@@ -189,7 +189,7 @@ No Spring, JPA or filesystem implementation is imported by core.
 The central facade delegates upload/reconciliation orchestration to
 `core.application.upload.DocumentUploads`, alongside package-private fingerprinting.
 Document, version, upload, audit and content packages keep responsibilities visible
-within each layer. See README for the public import migration.
+within each layer. See `docs/wiki/Architecture.md` for the public import migration.
 
 `get(id)` returns an `Optional`; `findByOwner(owner)` returns an immutable list.
 Both expose `ACTIVE` and `ARCHIVED` documents and hide `DELETED` documents.
@@ -208,12 +208,18 @@ version lookup. The facade filters foreign snapshots defensively and performs no
 binary I/O. An empty history for a visible document is an empty list. Listing
 versions does not grant content access: only `getContent` may open an available
 version. The host remains responsible for authorization. This operation returns
-the full history without pagination or an atomic snapshot spanning the document
-visibility check and version query.
+the full history without an atomic snapshot spanning the document visibility check
+and version query. The overloads `getVersions(documentId, limit)` and
+`getVersions(documentId, limit, afterNumber)` expose bounded pages, also available
+through `DocumentHandle.versions`. Limits are 1–1000; the exclusive number cursor
+is nonnegative and defaults to 0. JPA applies scope, cursor, ordering and limit at
+the data source through the existing document/number index. Pages are independent
+reads and obey an enclosing host transaction's isolation. All state, visibility,
+immutability and no-content-I/O rules remain the same.
 
 `DocumentVersionRepository.findByDocument` provides scoped version snapshots,
 including for retained deleted documents; the facade enforces visibility. Its
-default throws `UnsupportedOperationException`, preserving existing single-version
+full-history and paged overload defaults throw `UnsupportedOperationException`, preserving existing single-version
 implementations. Custom facades also inherit an unsupported default history method.
 JPA uses query projections ordered by version number, including with retained host
 entities. Existing constructors and Boot wiring enable history when the supplied

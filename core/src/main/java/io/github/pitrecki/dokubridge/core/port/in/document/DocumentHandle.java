@@ -64,6 +64,14 @@ public final class DocumentHandle {
         return bridge.getVersions(documentId);
     }
 
+    public List<DocumentVersion> versions(int limit) {
+        return bridge.getVersions(documentId, limit);
+    }
+
+    public List<DocumentVersion> versions(int limit, int afterNumber) {
+        return bridge.getVersions(documentId, limit, afterNumber);
+    }
+
     public List<DocumentAuditEntry> audit() {
         return bridge.getAudit(documentId);
     }

@@ -43,6 +43,8 @@ class FluentStagesCompilationTest {
                     doc.replaceMetadata(metadata).atRevision(0).saveAndThen(updated -> updated.archive());
                 });
                 document.versions();
+                var firstPage = document.versions(10);
+                if (!firstPage.isEmpty()) document.versions(10, firstPage.getLast().number());
                 for (var found : bridge.documentsForOwner("Invoice", "42")) {
                     found.and().replaceMetadata(metadata).atRevision(found.result().revision())
                             .saveAndThen(updated -> updated.archive());

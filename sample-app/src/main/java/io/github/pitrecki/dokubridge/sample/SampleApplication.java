@@ -57,6 +57,11 @@ public class SampleApplication {
         }
         var history = document.versions();
         if (!history.equals(List.of(first, second))) throw new IllegalStateException("Version history differs");
+        if (!document.versions(1).equals(List.of(first))
+                || !document.versions(1, first.number()).equals(List.of(second))
+                || !document.versions(1, second.number()).isEmpty()) {
+            throw new IllegalStateException("Paged version history differs");
+        }
         if (document.audit().size() != 4) throw new IllegalStateException("Active audit differs");
         var updated = found.and().replaceMetadata(Map.of("category", "revised"))
                 .atRevision(found.result().revision())
@@ -79,6 +84,6 @@ public class SampleApplication {
                 || bridge.documentsForOwner("Invoice", "sample-42").stream().anyMatch(candidate -> candidate.result().id().equals(first.documentId()))) {
             throw new IllegalStateException("Deleted document is still visible");
         }
-        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with pending discovery, managed content reads, document lookup, owner lookup, version history 1 and 2, audited events, metadata, archive and logical deletion");
+        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with pending discovery, managed content reads, document lookup, owner lookup, version history 1 and 2, paged history, audited events, metadata, archive and logical deletion");
     }
 }

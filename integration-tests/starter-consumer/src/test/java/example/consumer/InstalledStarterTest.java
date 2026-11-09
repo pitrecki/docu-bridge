@@ -109,9 +109,13 @@ class InstalledStarterTest {
             } finally {
                 release.countDown();
             }
-            assertThat(uploading.get(20, TimeUnit.SECONDS).result().state()).isEqualTo(DocumentVersionState.AVAILABLE);
+            var completed = uploading.get(20, TimeUnit.SECONDS).result();
+            assertThat(completed.state()).isEqualTo(DocumentVersionState.AVAILABLE);
             assertThat(bridge.pendingUploads(100)).isEmpty();
             assertThat(document.versions()).hasSize(2);
+            assertThat(document.versions(1)).extracting(version -> version.number()).containsExactly(1);
+            assertThat(document.versions(1, 1)).containsExactly(completed);
+            assertThat(document.versions(1, completed.number())).isEmpty();
         }
     }
 }

@@ -39,4 +39,17 @@ public final class JpaDocumentVersionRepository implements DocumentVersionReposi
                 from DocumentVersionEntity v where v.documentId = :document order by v.number
                 """, DocumentVersion.class).setParameter("document", documentId).getResultList().stream().toList());
     }
+
+    @Override
+    public List<DocumentVersion> findByDocument(UUID documentId, int limit, int afterNumber) {
+        Objects.requireNonNull(documentId);
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Version history limit must be between 1 and 1000");
+        if (afterNumber < 0) throw new IllegalArgumentException("Version number cursor must not be negative");
+        return read.execute(status -> List.copyOf(entities.createQuery("""
+                select new io.github.pitrecki.dokubridge.core.domain.version.DocumentVersion(v.id, v.documentId, v.number, v.state)
+                from DocumentVersionEntity v
+                where v.documentId = :document and v.number > :after order by v.number
+                """, DocumentVersion.class).setParameter("document", documentId).setParameter("after", afterNumber)
+                .setMaxResults(limit).getResultList()));
+    }
 }

@@ -389,7 +389,7 @@ class JpaDocumentLifecycleRepositoryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"get", "findDocument", "findByOwner", "getContent", "getVersions", "getAudit"})
+    @ValueSource(strings = {"get", "findDocument", "findByOwner", "getContent", "getVersions", "getVersionsPage", "getAudit"})
     void retainedHostContextCannotExposeACommittedDeletion(String operation) throws Exception {
         var version = newDocument();
         var retained = factory.getObject().createEntityManager();
@@ -409,6 +409,8 @@ class JpaDocumentLifecycleRepositoryTest {
                 case "findDocument" -> assertThat(guarded.findDocument(version.documentId())).isEmpty();
                 case "findByOwner" -> assertThat(guarded.findByOwner(owner)).isEmpty();
                 case "getVersions" -> assertThatThrownBy(() -> guarded.getVersions(version.documentId()))
+                        .isInstanceOf(DocumentNotFoundException.class);
+                case "getVersionsPage" -> assertThatThrownBy(() -> guarded.getVersions(version.documentId(), 10))
                         .isInstanceOf(DocumentNotFoundException.class);
                 case "getAudit" -> assertThatThrownBy(() -> guarded.getAudit(version.documentId()))
                         .isInstanceOf(DocumentNotFoundException.class);
@@ -474,6 +476,8 @@ class JpaDocumentLifecycleRepositoryTest {
                 executor.submit(() -> uploads.complete(request, pending.id(), outcome)).get(20, TimeUnit.SECONDS);
             }
             assertThat(versions.findById(first.documentId(), pending.id()).orElseThrow().state()).isEqualTo(outcome);
+            assertThat(bridge.getVersions(first.documentId(), 1, first.number())).singleElement()
+                    .satisfies(version -> assertThat(version.state()).isEqualTo(outcome));
             if (outcome == DocumentVersionState.AVAILABLE) {
                 try (var input = bridge.getContent(first.documentId(), pending.id())) {
                     assertThat(input.readAllBytes()).containsExactly((byte) 42);
@@ -509,6 +513,8 @@ class JpaDocumentLifecycleRepositoryTest {
                 }).get(20, TimeUnit.SECONDS);
             }
             assertThat(bridge.getVersions(first.documentId())).containsExactly(first, pending.markFailed(), third);
+            assertThat(bridge.getVersions(first.documentId(), 1, first.number())).containsExactly(pending.markFailed());
+            assertThat(bridge.getVersions(first.documentId(), 1, pending.number())).containsExactly(third);
             assertThat(before).containsExactly(first, pending);
             assertThat(bridge.get(first.documentId()).orElseThrow().revision()).isZero();
             assertThat(audits.findByDocument(first.documentId())).hasSize(5);

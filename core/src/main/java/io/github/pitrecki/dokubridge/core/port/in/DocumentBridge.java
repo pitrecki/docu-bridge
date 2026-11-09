@@ -144,6 +144,21 @@ public interface DocumentBridge {
         throw new UnsupportedOperationException("Version history is not configured");
     }
 
+    /** Reads the first version-history page, with a size from 1 to 1000. */
+    default List<DocumentVersion> getVersions(UUID documentId, int limit) {
+        return getVersions(documentId, limit, 0);
+    }
+
+    /**
+     * Returns all version states in ascending number order after the exclusive cursor.
+     * Zero starts the first page; the cursor must be non-negative and the limit 1..1000.
+     * Missing/deleted documents report not found. No content is opened or audit added.
+     * Pages are independent snapshots under the host's read transaction isolation.
+     */
+    default List<DocumentVersion> getVersions(UUID documentId, int limit, int afterNumber) {
+        throw new UnsupportedOperationException("Paged version history is not configured");
+    }
+
     /** Returns an immutable audit in insertion order; missing/deleted documents report not found. */
     default List<DocumentAuditEntry> getAudit(UUID documentId) {
         throw new UnsupportedOperationException("Audit history is not configured");

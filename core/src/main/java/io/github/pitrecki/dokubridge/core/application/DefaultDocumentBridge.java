@@ -174,6 +174,19 @@ public final class DefaultDocumentBridge implements DocumentBridge {
     }
 
     @Override
+    public List<DocumentVersion> getVersions(UUID documentId, int limit, int afterNumber) {
+        Objects.requireNonNull(documentId, "Document id must not be null");
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Version history limit must be between 1 and 1000");
+        if (afterNumber < 0) throw new IllegalArgumentException("Version number cursor must not be negative");
+        get(documentId).orElseThrow(() -> new DocumentNotFoundException(documentId));
+        return versions.findByDocument(documentId, limit, afterNumber).stream()
+                .filter(version -> version.documentId().equals(documentId) && version.number() > afterNumber)
+                .sorted(Comparator.comparingInt(DocumentVersion::number))
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
     public List<DocumentAuditEntry> getAudit(UUID documentId) {
         Objects.requireNonNull(documentId, "Document id must not be null");
         get(documentId).orElseThrow(() -> new DocumentNotFoundException(documentId));

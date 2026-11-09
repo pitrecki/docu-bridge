@@ -164,6 +164,45 @@ class JpaDocumentUploadRepositoryTest {
     }
 
     @Test
+    void pagesAllVersionStatesByExclusiveNumberWithoutLoadingContent() {
+        UUID request = UUID.randomUUID();
+        var reserved = uploads.reserveAttach(request, fingerprint, owner, Map.of()).version();
+        var first = uploads.complete(request, reserved.id(), DocumentVersionState.AVAILABLE);
+        UUID nextRequest = UUID.randomUUID();
+        var secondPending = uploads.reserveVersion(nextRequest, fingerprint, first.documentId()).version();
+        var second = uploads.complete(nextRequest, secondPending.id(), DocumentVersionState.FAILED);
+        var third = uploads.reserveVersion(UUID.randomUUID(), fingerprint, first.documentId()).version();
+        uploads.reserveAttach(UUID.randomUUID(), fingerprint, owner, Map.of());
+        var bridge = new DefaultDocumentBridge(documents, versions, new DocumentContentStore() {
+            public void store(UUID id, java.io.InputStream source) { throw new AssertionError("Unexpected upload"); }
+            public java.io.InputStream open(UUID id) { throw new AssertionError("Unexpected download"); }
+        });
+        var page = bridge.document(first.documentId()).versions(2);
+        assertThat(page).containsExactly(first, second);
+        assertThat(bridge.getVersions(first.documentId(), 2, page.getLast().number())).containsExactly(third);
+        assertThat(bridge.getVersions(first.documentId(), 1, third.number())).isEmpty();
+        assertThat(versions.findByDocument(first.documentId(), 1, 1)).containsExactly(second);
+        assertThatThrownBy(() -> page.clear()).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> versions.findByDocument(first.documentId(), 1, 0).clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+        setState(first.documentId(), "ARCHIVED");
+        assertThat(bridge.getVersions(first.documentId(), 1000, 0)).containsExactly(first, second, third);
+        assertThat(bridge.getVersions(first.documentId(), 1, Integer.MAX_VALUE)).isEmpty();
+        assertThat(versions.findByDocument(UUID.randomUUID(), 1, 0)).isEmpty();
+        assertThat(audits.findByDocument(first.documentId())).hasSize(5);
+    }
+
+    @Test
+    void rejectsInvalidPageBoundsAtTheVersionRepositoryBoundary() {
+        UUID document = UUID.randomUUID();
+        for (int limit : new int[]{-1, 0, 1001, Integer.MAX_VALUE}) {
+            assertThatIllegalArgumentException().isThrownBy(() -> versions.findByDocument(document, limit, 0));
+        }
+        assertThatIllegalArgumentException().isThrownBy(() -> versions.findByDocument(document, 1, -1));
+        assertThatNullPointerException().isThrownBy(() -> versions.findByDocument(null, 1, 0));
+    }
+
+    @Test
     void deletedDocumentHistoryRemainsRetainedButIsHiddenByTheFacade() {
         var pending = uploads.reserveAttach(UUID.randomUUID(), fingerprint, owner, Map.of()).version();
         var bridge = new DefaultDocumentBridge(documents, versions, new DocumentContentStore() {
@@ -174,7 +213,10 @@ class JpaDocumentUploadRepositoryTest {
                 .delete(pending.documentId());
         assertThatThrownBy(() -> bridge.getVersions(pending.documentId())).isInstanceOf(DocumentNotFoundException.class);
         assertThatThrownBy(() -> bridge.getVersions(UUID.randomUUID())).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(() -> bridge.getVersions(pending.documentId(), 10)).isInstanceOf(DocumentNotFoundException.class);
+        assertThatThrownBy(() -> bridge.getVersions(UUID.randomUUID(), 10)).isInstanceOf(DocumentNotFoundException.class);
         assertThat(versions.findByDocument(pending.documentId())).containsExactly(pending);
+        assertThat(versions.findByDocument(pending.documentId(), 10, 0)).containsExactly(pending);
         assertThat(audits.findByDocument(pending.documentId())).hasSize(2);
     }
 
