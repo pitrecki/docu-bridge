@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="144" viewBox="0 0 640 144" role="img" aria-labelledby="title desc">
+  <title id="title">DokuBridge</title>
+  <desc id="desc">Two document pillars connected by a bridge, followed by the DokuBridge wordmark.</desc>
+  <rect width="640" height="144" rx="24" fill="#f5f8fa"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M30 105V45a6 6 0 0 1 6-6h22l13 13v53" stroke="#153347" stroke-width="5"/>
+    <path d="M57 40v14h13M41 69h15M41 80h10" stroke="#153347" stroke-width="4"/>
+    <path d="M89 105V45a6 6 0 0 1 6-6h22l13 13v53" stroke="#153347" stroke-width="5"/>
+    <path d="M116 40v14h13M101 69h14M108 80h7" stroke="#153347" stroke-width="4"/>
+    <path d="M46 103c0-40 68-40 68 0M37 105h86" stroke="#087f8c" stroke-width="6"/>
+  </g>
+  <text x="157" y="89" font-family="DejaVu Sans, Segoe UI, sans-serif" font-size="49" font-weight="700" letter-spacing="-2" fill="#153347">Doku<tspan fill="#087f8c">Bridge</tspan></text>
+</svg>

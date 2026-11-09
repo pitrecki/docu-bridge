@@ -84,6 +84,7 @@ DokuBridge is an embeddable Java library for attaching versioned documents, meta
 - Documentation must sound like an engineer wrote it: direct, factual and concise. No generic introductions, sales language, filler, emojis or AI-style conclusions.
 - Explain decisions, constraints, invariants, public behavior and non-obvious failure modes. Do not narrate the code or repeat information obvious from names.
 - Prefer a short paragraph, a compact example or a small table to long inventories of best practices.
+- Keep README focused on purpose, a fluent example and the upload flow. Maintain full documentation in `docs/wiki` and publish it with `scripts/publish-wiki.sh` to GitHub Wiki.
 - Update docs only when behavior, API, architecture, setup or an important decision changes. Do not generate new documentation files for routine edits.
 - Comments explain **why**, never merely **what**. Avoid routine Javadoc on self-explanatory private methods.
 - Document trade-offs only where an actual decision was made. Mark unsettled decisions as open; never present assumptions as settled facts.
