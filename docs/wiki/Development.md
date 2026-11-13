@@ -101,9 +101,21 @@ alongside code, then publish them to the separate GitHub Wiki Git repository:
 ./scripts/publish-wiki.sh
 ```
 
+The publisher reads page names and content directly from the commit at `HEAD`
+when it starts. Commit documentation changes before publishing: staged, unstaged
+and untracked files are not part of that snapshot. The wiki commit records that
+same source revision even if the source checkout changes during publication.
+
 Publishing requires push access to `pitrecki/docu-bridge.wiki.git`. If the wiki has
 never been initialized, enable Wiki in repository settings and create its first
 page in the GitHub UI before running the script. The publisher preserves unrelated
 wiki pages and normalizes local Markdown navigation for GitHub Wiki. It commits
 as Piotr Nowak <piotr_nowak@outlook.com>. To preview publication in a local Git
 repository, override `DOKUBRIDGE_WIKI_REMOTE` with its path.
+
+CI checks publication against temporary local Git repositories without GitHub
+credentials or network access. Run those checks locally with:
+
+```sh
+./scripts/test-publish-wiki.sh
+```

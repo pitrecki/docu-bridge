@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify wiki publisher with local Git repositories
+        run: ./scripts/test-publish-wiki.sh
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
