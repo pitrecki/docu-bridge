@@ -44,6 +44,16 @@ upload from becoming unreadable when a stored number exceeds Jackson's default
 constraints are unchanged. Values outside PostgreSQL's numeric range remain
 subject to database rejection.
 
+The adapter also verifies serialized metadata with its snapshot reader before
+committing an attachment or metadata replacement. Jackson can serialize values
+that exceed its read constraints, including long field names; these must not
+create an unreadable stored document. Such input raises `IllegalArgumentException`
+with the Jackson failure as its cause. A rejected attachment rolls back its
+request reservation before content is written, allowing the key to be reused.
+A rejected replacement preserves metadata, revision and audit. Core metadata
+types retain their JSON value contract; this check belongs to JPA persistence
+and uses its existing parser limits.
+
 `DocumentUploadRepository` is a semantic transaction port. Each reservation claims
 a globally unique UUID request key and its caller-supplied SHA-256 fingerprint,
 records the declared content checksum, allocates a `PENDING` version and appends

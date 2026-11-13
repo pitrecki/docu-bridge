@@ -1,5 +1,6 @@
 package example.consumer;
 
+import com.fasterxml.jackson.core.StreamReadConstraints;
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditAction;
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
@@ -50,6 +51,9 @@ class InstalledStarterTest {
             byte[] bytes = "external consumer".getBytes(StandardCharsets.UTF_8);
             assertThatIllegalArgumentException().isThrownBy(() -> bridge.upload(bytes)
                     .toOwner("Invoice" + (char) 0xD800, "external-42").save()).withMessageContaining("UTF-8");
+            assertThatIllegalArgumentException().isThrownBy(() -> bridge.upload(bytes)
+                    .toOwner("Invoice", "external-42")
+                    .metadata("k".repeat(StreamReadConstraints.defaults().getMaxNameLength() + 1), "value").save());
             var numericMetadata = new BigInteger("9".repeat(1_001));
             var upload = bridge.upload(bytes).toOwner("Invoice", "external-42")
                     .metadata("origin", "external").metadata("numeric", numericMetadata).requestId(UUID.randomUUID());

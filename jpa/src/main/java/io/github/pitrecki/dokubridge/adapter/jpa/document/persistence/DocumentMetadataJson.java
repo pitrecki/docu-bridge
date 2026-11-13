@@ -24,7 +24,10 @@ final class DocumentMetadataJson {
 
     static String encode(Map<String, Object> metadata) {
         try {
-            return JSON.writeValueAsString(metadata);
+            String encoded = JSON.writeValueAsString(metadata);
+            // Jackson's write constraints do not cover every read limit, including field-name length.
+            JSON.readValue(encoded, MAP);
+            return encoded;
         } catch (JsonProcessingException failure) {
             throw new IllegalArgumentException("Cannot encode document metadata", failure);
         }

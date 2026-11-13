@@ -1,5 +1,7 @@
 package io.github.pitrecki.dokubridge.adapter.jpa.upload;
 
+import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.core.exc.StreamConstraintsException;
 import io.github.pitrecki.dokubridge.adapter.filesystem.content.FilesystemDocumentContentStore;
 import io.github.pitrecki.dokubridge.adapter.jpa.audit.JpaDocumentAuditRepository;
 import io.github.pitrecki.dokubridge.adapter.jpa.document.JpaBusinessDocumentRepository;
@@ -42,6 +44,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
@@ -99,6 +102,48 @@ class FluentDocumentBridgeTest {
         audits = new JpaDocumentAuditRepository(entities, transactions);
         files = new FilesystemDocumentContentStore(root);
         bridge = usingStore(files);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(booleans = {false, true})
+    void unreadableMetadataCannotCommitOrConsumeAnUploadKey(boolean nested) throws Exception {
+        Map<String, Object> oversized = Map.of("k".repeat(StreamReadConstraints.defaults().getMaxNameLength() + 1), "value");
+        Map<String, Object> metadata = nested ? Map.of("items", List.of(oversized)) : oversized;
+        var writes = new AtomicInteger();
+        var guarded = usingStore(new DocumentContentStore() {
+            public void store(UUID id, InputStream source) throws IOException {
+                writes.incrementAndGet();
+                files.store(id, source);
+            }
+            public InputStream open(UUID id) throws IOException { return files.open(id); }
+        });
+        UUID key = UUID.randomUUID();
+        var invalid = guarded.upload(bytes).toOwner("Invoice", "42").metadata(metadata).requestId(key);
+        assertThatThrownBy(invalid::save).isInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseInstanceOf(StreamConstraintsException.class);
+        assertThat(writes).hasValue(0);
+        assertThat(guarded.documentsForOwner("Invoice", "42")).isEmpty();
+        assertThat(guarded.pendingUploads(10)).isEmpty();
+
+        var corrected = guarded.upload(bytes).toOwner("Invoice", "42")
+                .metadata("category", "original").requestId(key);
+        var saved = corrected.save();
+        var before = saved.and().get().orElseThrow();
+        var auditBefore = saved.and().audit();
+        assertThatThrownBy(() -> saved.and().replaceMetadata(metadata).atRevision(before.revision()).save())
+                .isInstanceOf(IllegalArgumentException.class).hasRootCauseInstanceOf(StreamConstraintsException.class);
+        assertThat(saved.and().get()).contains(before);
+        assertThat(saved.and().audit()).isEqualTo(auditBefore);
+        assertThat(saved.and().versions()).containsExactly(saved.result());
+        assertThat(writes).hasValue(1);
+        assertThat(corrected.save().result()).isEqualTo(saved.result());
+    }
+
+    @Test
+    void metadataAtTheReadNameLimitRemainsSupported() throws Exception {
+        String key = "k".repeat(StreamReadConstraints.defaults().getMaxNameLength());
+        var saved = bridge.upload(bytes).toOwner("Invoice", "42").metadata(key, "value").save();
+        assertThat(saved.and().get().orElseThrow().metadata()).containsEntry(key, "value");
     }
 
     @ParameterizedTest(name = "{0}")

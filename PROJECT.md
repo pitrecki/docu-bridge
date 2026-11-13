@@ -367,6 +367,14 @@ point. Valid committed numeric metadata therefore remains readable beyond
 Jackson's default 1000-character number limit. Host mapper settings and the
 remaining Jackson constraints are unchanged.
 
+Before persisting attachment or replacement metadata, the adapter reads its
+serialized JSON through the same mapper used for snapshots. Jackson's write
+limits alone do not cover read limits such as field-name length. Metadata outside
+those limits raises `IllegalArgumentException` before the transaction commits.
+Rejected attachments roll back their request reservation without content I/O;
+rejected replacements retain the previous metadata, revision and audit. This
+validation uses the existing Jackson configuration without new domain limits.
+
 `DocumentUploadRepository` is a semantic transaction port. Each reservation claims
 a globally unique UUID request key and its caller-supplied SHA-256 fingerprint,
 records the declared content checksum, allocates a `PENDING` version and appends
