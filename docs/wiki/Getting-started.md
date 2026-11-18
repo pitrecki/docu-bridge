@@ -38,6 +38,10 @@ run outside host transactions.
 | `dokubridge.storage.root` | unset | Required unless a `DocumentContentStore` bean is supplied. |
 | `dokubridge.jpa.initialize-schema` | `false` | Runs the library Flyway migrations before JPA initialization. |
 
+Compatible IDEs use the starter's Spring Boot metadata to show property names,
+default values and descriptions in `application.properties` and `application.yml`.
+The descriptions include the storage directory requirements and migration ordering.
+
 Host beans replace the corresponding default ports or facade. The entity scan
 adds library entities while retaining the host's implicit scan or explicit
 `@EntityScan`. Custom entity manager factories must include the library persistence
