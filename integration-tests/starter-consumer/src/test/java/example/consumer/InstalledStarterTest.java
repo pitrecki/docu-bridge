@@ -64,8 +64,14 @@ class InstalledStarterTest {
             assertThat(saved.result().state()).isEqualTo(DocumentVersionState.AVAILABLE);
             assertThat(upload.save().result()).isEqualTo(saved.result());
             assertThat(saved.and().versions()).containsExactly(saved.result());
-            assertThat(saved.and().audit()).extracting(DocumentAuditEntry::action)
+            var audit = saved.and().audit();
+            assertThat(audit).extracting(DocumentAuditEntry::action)
                     .containsExactly(DocumentAuditAction.DOCUMENT_ATTACHED, DocumentAuditAction.UPLOAD_SUCCEEDED);
+            var auditPage = saved.and().audit(1);
+            assertThat(auditPage).containsExactly(audit.getFirst());
+            assertThat(saved.and().audit(1, auditPage.getLast().id())).containsExactly(audit.getLast());
+            assertThat(saved.and().audit(1, audit.getLast().id())).isEmpty();
+            assertThatIllegalArgumentException().isThrownBy(() -> saved.and().audit(1, UUID.randomUUID()));
             verifyInFlightDiscovery(bridge, saved.and(), bytes);
 
             var found = bridge.documentsForOwner("Invoice", "external-42", 1).getFirst();

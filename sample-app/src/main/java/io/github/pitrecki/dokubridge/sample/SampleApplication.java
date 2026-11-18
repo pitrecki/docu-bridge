@@ -62,7 +62,14 @@ public class SampleApplication {
                 || !document.versions(1, second.number()).isEmpty()) {
             throw new IllegalStateException("Paged version history differs");
         }
-        if (document.audit().size() != 4) throw new IllegalStateException("Active audit differs");
+        var audit = document.audit();
+        if (audit.size() != 4) throw new IllegalStateException("Active audit differs");
+        var auditPage = document.audit(2);
+        if (!auditPage.equals(audit.subList(0, 2))
+                || !document.audit(2, auditPage.getLast().id()).equals(audit.subList(2, 4))
+                || !document.audit(2, audit.getLast().id()).isEmpty()) {
+            throw new IllegalStateException("Paged audit differs");
+        }
         var updated = found.and().replaceMetadata(Map.of("category", "revised"))
                 .atRevision(found.result().revision())
                 .save();
@@ -84,6 +91,6 @@ public class SampleApplication {
                 || bridge.documentsForOwner("Invoice", "sample-42").stream().anyMatch(candidate -> candidate.result().id().equals(first.documentId()))) {
             throw new IllegalStateException("Deleted document is still visible");
         }
-        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with pending discovery, managed content reads, document lookup, owner lookup, version history 1 and 2, paged history, audited events, metadata, archive and logical deletion");
+        System.out.println("Verified document " + first.documentId() + " through fluent API (chain and callback) with pending discovery, managed content reads, document lookup, owner lookup, version history 1 and 2, paged history, paged audit, audited events, metadata, archive and logical deletion");
     }
 }

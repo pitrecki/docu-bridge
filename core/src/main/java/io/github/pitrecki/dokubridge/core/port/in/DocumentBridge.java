@@ -201,6 +201,21 @@ public interface DocumentBridge {
         throw new UnsupportedOperationException("Audit history is not configured");
     }
 
+    /** Reads the first audit page with a size from 1 to 1000. */
+    default List<DocumentAuditEntry> getAudit(UUID documentId, int limit) {
+        return getAudit(documentId, limit, null);
+    }
+
+    /**
+     * Returns an immutable audit page in insertion order after the exclusive event-id cursor.
+     * Null starts the first page; limit must be 1..1000. An unknown or foreign cursor is invalid.
+     * Missing/deleted documents report not found before audit lookup. No content is opened.
+     * Pages are independent reads under the host's transaction isolation; the host authorizes access.
+     */
+    default List<DocumentAuditEntry> getAudit(UUID documentId, int limit, UUID afterEventId) {
+        throw new UnsupportedOperationException("Paged audit history is not configured");
+    }
+
     /**
      * Opens an AVAILABLE version belonging to a non-deleted document.
      * The caller must close the returned stream.

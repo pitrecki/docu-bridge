@@ -28,4 +28,30 @@ public final class JpaDocumentAuditRepository implements DocumentAuditRepository
                 from DocumentAuditEntity a where a.documentId = :id order by a.position
                 """, DocumentAuditEntry.class).setParameter("id", documentId).getResultList().stream().toList());
     }
+
+    @Override
+    public List<DocumentAuditEntry> findByDocument(UUID documentId, int limit, UUID afterEventId) {
+        Objects.requireNonNull(documentId);
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Audit history limit must be between 1 and 1000");
+        return read.execute(status -> {
+            Long afterPosition = null;
+            if (afterEventId != null) {
+                afterPosition = entities.createQuery("""
+                        select a.position from DocumentAuditEntity a
+                        where a.documentId = :document and a.id = :event
+                        """, Long.class).setParameter("document", documentId).setParameter("event", afterEventId)
+                        .getResultList().stream().findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException("Audit cursor does not belong to the requested document"));
+            }
+            var query = entities.createQuery("""
+                    select new io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry(
+                        a.id, a.documentId, a.versionId, a.requestId, a.action, a.occurredAt)
+                    from DocumentAuditEntity a where a.documentId = :document
+                    """ + (afterPosition == null ? "" : " and a.position > :after")
+                    + " order by a.position", DocumentAuditEntry.class)
+                    .setParameter("document", documentId).setMaxResults(limit);
+            if (afterPosition != null) query.setParameter("after", afterPosition);
+            return query.getResultList().stream().toList();
+        });
+    }
 }

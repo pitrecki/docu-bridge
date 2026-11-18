@@ -11,7 +11,7 @@ content and an audit trail. The host owns authorization and its business API.
 2. [Fluent API](Fluent-API.md): drafts, results, continuations, callbacks,
    idempotent retries and streaming uploads.
 3. [Reading documents](Reading-documents.md): document lookup, paged owner results
-   and version history, managed downloads and audit history.
+   and version history, managed downloads and paged audit history.
 
 ## Behavior and operations
 

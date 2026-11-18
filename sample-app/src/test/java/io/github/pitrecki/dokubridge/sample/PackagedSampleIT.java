@@ -44,7 +44,7 @@ class PackagedSampleIT {
                 String output = Files.readString(log);
                 assertThat(process.exitValue()).withFailMessage(output).isZero();
                 assertThat(output).contains("Verified document ", "version history 1 and 2", "audited events",
-                        "fluent API", "chain and callback", "owner lookup", "document lookup", "managed content reads", "pending discovery", "paged history");
+                        "fluent API", "chain and callback", "owner lookup", "document lookup", "managed content reads", "pending discovery", "paged history", "paged audit");
             } finally {
                 if (process.isAlive()) process.destroyForcibly().waitFor();
             }

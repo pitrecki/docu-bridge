@@ -210,6 +210,18 @@ public final class DefaultDocumentBridge implements DocumentBridge {
     }
 
     @Override
+    public List<DocumentAuditEntry> getAudit(UUID documentId, int limit, UUID afterEventId) {
+        Objects.requireNonNull(documentId, "Document id must not be null");
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Audit history limit must be between 1 and 1000");
+        get(documentId).orElseThrow(() -> new DocumentNotFoundException(documentId));
+        if (audits == null) throw new UnsupportedOperationException("Audit history requires a DocumentAuditRepository");
+        return audits.findByDocument(documentId, limit, afterEventId).stream()
+                .filter(entry -> entry.documentId().equals(documentId))
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
     public InputStream getContent(UUID documentId, UUID versionId) throws IOException {
         Objects.requireNonNull(documentId, "Document id must not be null");
         Objects.requireNonNull(versionId, "Version id must not be null");

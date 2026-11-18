@@ -198,9 +198,9 @@ The facade returns an immutable list of document and upload events in database
 insertion order. Timestamps may move backwards across producers and do not define
 this order. Active and archived documents are visible; missing or deleted
 documents raise `DocumentNotFoundException` before querying audit. No content is
-opened and reading history adds no event. The host authorizes access. The operation
-returns the full list without pagination, with the same snapshot/isolation limits
-as other reads.
+opened and reading history adds no event. The host authorizes access. The original
+`audit()` method returns the full list, with the same snapshot/isolation limits as
+other reads.
 
 Upload actions carry version/request UUIDs; metadata, archive and delete actions
 have null values for both. Check `entry.action().requiresUploadContext()` before
@@ -221,6 +221,38 @@ three-, four- and five-port compositions still work; they do not enable audit
 history. Custom facades inherit an unsupported default `getAudit` method. Boot
 passes the selected `DocumentAuditRepository` bean to the facade and respects a
 host-provided replacement. No new property, dependency or migration is required.
+
+### Paged audit
+
+```java
+var document = bridge.document(documentId);
+var page = document.audit(100);
+if (!page.isEmpty()) {
+    var nextPage = document.audit(100, page.getLast().id());
+}
+```
+
+Limits are 1–1000. The event UUID is an exclusive cursor; null starts the first
+page. UUIDs identify the anchor event, while insertion order determines which
+events follow it. Timestamps and UUID sorting do not establish this order.
+Unknown cursors or cursors from another document raise `IllegalArgumentException`;
+a valid cursor at the end returns an empty page. Missing or deleted documents
+still raise `DocumentNotFoundException` before the audit repository is queried.
+
+Pages are immutable and include all document/upload actions. Listing opens no
+content and creates no audit. The host authorizes access. Pages are independent
+reads under the host's transaction isolation. An event committed later with an
+earlier insertion position can fall behind a cursor; restart a scan to include
+such events. No atomic snapshot spans a visibility check and its audit query.
+
+The facade also exposes `getAudit(documentId, limit)` and
+`getAudit(documentId, limit, afterEventId)`. The paged
+`DocumentAuditRepository.findByDocument` overload resolves the anchor within the
+document and limits results at the data source. JPA uses the existing event UUID
+key and `(document_id, position)` index, without exposing database positions in
+the public model. Existing full-history methods remain available; custom facades
+and repositories inherit unsupported paged defaults, with no full-list fallback.
+The starter needs no new wiring, configuration or migration.
 
 ## Read consistency
 

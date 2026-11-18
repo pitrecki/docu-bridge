@@ -76,6 +76,14 @@ public final class DocumentHandle {
         return bridge.getAudit(documentId);
     }
 
+    public List<DocumentAuditEntry> audit(int limit) {
+        return bridge.getAudit(documentId, limit);
+    }
+
+    public List<DocumentAuditEntry> audit(int limit, UUID afterEventId) {
+        return bridge.getAudit(documentId, limit, afterEventId);
+    }
+
     /** The caller closes the returned stream, as with DocumentBridge.getContent. */
     public InputStream content(UUID versionId) throws IOException {
         return bridge.getContent(documentId, versionId);

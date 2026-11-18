@@ -252,8 +252,23 @@ foreign or deleted document raises `DocumentNotFoundException` before the audit
 port is called. Foreign audit snapshots are filtered defensively. A visible
 document with no events has an empty list. Repository failures propagate rather
 than becoming empty histories. Reading adds no event and performs no binary I/O.
-The host authorizes access. There is no pagination or atomic snapshot spanning
-the visibility check and history query.
+The host authorizes access. The original method returns the full history without
+an atomic snapshot spanning the visibility check and history query.
+
+`getAudit(documentId, limit)` and its `afterEventId` overload provide immutable
+pages, also available through `DocumentHandle.audit`. Limits are 1–1000; null
+starts the first page. The event UUID is an exclusive anchor in insertion order,
+not a sorting key. Unknown or foreign cursors raise `IllegalArgumentException`.
+Document visibility is checked first, and a valid terminal cursor returns an
+empty page. The paged audit port scopes the anchor to the document before using
+its insertion position and limiting results at the data source. JPA uses the
+existing event key and document/position index without exposing positions in
+domain snapshots. Custom ports/facades inherit unsupported paged defaults;
+existing full-history methods remain available without an in-memory fallback.
+Pages join host read transactions with their existing isolation. Late commits
+behind a cursor require restarting the scan. Reads perform no content I/O,
+transition or audit; the host authorizes access. No new dependency, migration or
+Boot wiring is needed.
 
 `DocumentAuditRepository` remains the lower-level port for retained history,
 including deleted documents. Application-level reads use the facade's visibility
