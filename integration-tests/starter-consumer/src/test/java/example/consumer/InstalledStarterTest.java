@@ -1,6 +1,7 @@
 package example.consumer;
 
 import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditAction;
 import io.github.pitrecki.dokubridge.core.domain.audit.DocumentAuditEntry;
 import io.github.pitrecki.dokubridge.core.domain.version.DocumentVersionState;
@@ -13,6 +14,8 @@ import java.io.InputStream;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -35,6 +38,28 @@ class InstalledStarterTest {
     @Container
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17.6");
     @TempDir Path storage;
+
+    @Test
+    void installedStarterIncludesPropertyDescriptionsWithoutTheBuildTimeProcessor() throws Exception {
+        var loader = DocumentBridge.class.getClassLoader();
+        var names = new HashSet<String>();
+        var json = new ObjectMapper();
+        for (var resource : Collections.list(loader.getResources("META-INF/spring-configuration-metadata.json"))) {
+            try (var input = resource.openStream()) {
+                for (var property : json.readTree(input).path("properties")) {
+                    String name = property.path("name").asText();
+                    if (name.startsWith("dokubridge.")) {
+                        assertThat(property.path("description").asText()).isNotBlank();
+                        names.add(name);
+                    }
+                }
+            }
+        }
+        assertThat(names).containsExactlyInAnyOrder(
+                "dokubridge.enabled", "dokubridge.storage.root", "dokubridge.jpa.initialize-schema");
+        assertThat(loader.getResource("org/springframework/boot/configurationprocessor/ConfigurationMetadataAnnotationProcessor.class"))
+                .as("Build-time configuration processor must not be a transitive runtime dependency").isNull();
+    }
 
     @Test
     void consumesInstalledStarterOutsideTheLibraryReactor() throws Exception {

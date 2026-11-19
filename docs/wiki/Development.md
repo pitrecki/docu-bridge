@@ -67,6 +67,15 @@ are allowed; broken documentation fails the build. Documentation generation does
 not fetch external API links. The dependency-only starter and executable sample
 produce their existing JARs without source or Javadoc attachments.
 
+The auto-configuration module declares Spring Boot's configuration processor on
+the compiler's annotation processor path, using the same Boot version as its
+dependencies. Metadata generation therefore uses an explicit processor setup
+rather than relying on a JDK's classpath discovery defaults. The generated
+`META-INF/spring-configuration-metadata.json` ships in the library JAR; the processor
+is a build-time dependency. Tests check property names, defaults and descriptions,
+and the independent starter consumer checks the installed metadata and processor
+isolation from its runtime classpath.
+
 ## Run the sample
 
 The sample requires these environment variables for a development PostgreSQL
