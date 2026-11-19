@@ -23,6 +23,7 @@ import io.github.pitrecki.dokubridge.testhost.HostRecord;
 import jakarta.persistence.EntityManagerFactory;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.sql.DriverManager;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +44,13 @@ import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.boot.autoconfigure.transaction.TransactionAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -130,6 +139,47 @@ class DokuBridgeAutoConfigurationTest {
             assertThat(managed).contains(AllowedRecord.class).doesNotContain(HostRecord.class);
             assertThat(managed).anyMatch(type -> type.getPackageName().startsWith("io.github.pitrecki.dokubridge.adapter.jpa.")
                     && type.getPackageName().endsWith(".persistence"));
+        });
+    }
+
+    @Test
+    void usesPrimaryJpaManagerAndRejectsUploadsInsideItsHostTransactionWithoutSideEffects() {
+        runner().withUserConfiguration(JpaTransactionsConfiguration.class, JdbcTransactionsConfiguration.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBeansOfType(PlatformTransactionManager.class))
+                            .containsOnlyKeys("hostJpaTransactions", "hostJdbcTransactions");
+                    var transactions = context.getBean(PlatformTransactionManager.class);
+                    assertThat(transactions).isSameAs(context.getBean("hostJpaTransactions"));
+                    var bridge = context.getBean(DocumentBridge.class);
+                    var upload = bridge.upload(new byte[]{42}).toOwner("Invoice", "transactions")
+                            .requestId(UUID.randomUUID());
+
+                    new TransactionTemplate(transactions).executeWithoutResult(status ->
+                            assertThatIllegalStateException().isThrownBy(upload::save)
+                                    .withMessageContaining("must not run inside a host transaction"));
+
+                    assertThat(count("dokubridge_documents")).isZero();
+                    assertThat(count("dokubridge_versions")).isZero();
+                    assertThat(count("dokubridge_upload_requests")).isZero();
+                    assertThat(count("dokubridge_audit")).isZero();
+                    try (var files = Files.list(directory.resolve("content"))) {
+                        assertThat(files).isEmpty();
+                    }
+
+                    var saved = upload.save();
+                    assertThat(saved.result().state()).isEqualTo(DocumentVersionState.AVAILABLE);
+                    assertThat(saved.and().readContent(InputStream::readAllBytes)).containsExactly((byte) 42);
+                    assertThat(saved.and().audit()).hasSize(2);
+                });
+    }
+
+    @Test
+    void jdbcTransactionManagerFailsStartupWithJpaConfigurationError() {
+        runner().withUserConfiguration(JdbcTransactionsConfiguration.class).run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure()).hasRootCauseInstanceOf(IllegalArgumentException.class)
+                    .hasStackTraceContaining("require a JpaTransactionManager for the selected EntityManagerFactory");
         });
     }
 
@@ -242,6 +292,23 @@ class DokuBridgeAutoConfigurationTest {
             assertThat(count("host_record")).isEqualTo(1);
             assertThat(count("dokubridge_flyway_history")).isEqualTo(4);
         });
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class JpaTransactionsConfiguration {
+        @Bean
+        @Primary
+        JpaTransactionManager hostJpaTransactions(EntityManagerFactory factory) {
+            return new JpaTransactionManager(factory);
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class JdbcTransactionsConfiguration {
+        @Bean
+        DataSourceTransactionManager hostJdbcTransactions(DataSource dataSource) {
+            return new DataSourceTransactionManager(dataSource);
+        }
     }
 
     private long count(String table) throws Exception {
